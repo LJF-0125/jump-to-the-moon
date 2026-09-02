@@ -28,6 +28,9 @@
   #mutebtn { position: fixed; top: 12px; right: 14px; z-index: 9; cursor: pointer;
     background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15);
     border-radius: 8px; font-size: 17px; padding: 5px 9px; }
+  #skipTut { position: fixed; top: 12px; left: 14px; z-index: 9; cursor: pointer;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15);
+    border-radius: 8px; font-size: 14px; padding: 6px 10px; color: #c6cfe8; }
   #wrap { position: relative; }
   .panel[hidden] { display: none; }  /* display:flex 会盖掉 hidden 属性，必须显式补回 */
   .panel { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column;
@@ -77,7 +80,7 @@
   .t-star { position: absolute; color: #ffd54a; font-size: 12px; animation: twinkle 1.8s ease-in-out infinite; }
   .t-star.s1 { left: -24px; top: 10px; }
   .t-star.s2 { right: -20px; bottom: 16px; animation-delay: .9s; }
-  #shopList { width: 100%; max-width: 320px; max-height: 46vh; overflow-y: auto;
+  #shopList, #achList { width: 100%; max-width: 320px; max-height: 46vh; overflow-y: auto;
     display: flex; flex-direction: column; gap: 8px; }
   .shop-cat { color: #9aa7d0; font-size: 12px; letter-spacing: 2px; margin-top: 6px; text-align: left; }
   .shop-row { display: flex; align-items: center; gap: 10px;
@@ -88,10 +91,13 @@
   .shop-btn { flex: none; min-width: 76px; padding: 7px 10px; font-size: 13px; border: none;
     border-radius: 8px; background: linear-gradient(160deg, #5b8ff5, #2f6bf0); color: #fff; cursor: pointer; }
   .shop-btn:disabled { background: rgba(255,255,255,.12); color: #8b96bd; cursor: default; }
+  #shareImg { max-width: 78%; max-height: 48vh; border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.5); }
+  a.bigbtn { display: inline-block; text-decoration: none; }
 </style>
 </head>
 <body>
   <button id="mutebtn" title="静音 (M)">🔊</button>
+  <button id="skipTut" hidden>跳过 ›</button>
   <div id="wrap">
     <canvas id="game" width="420" height="640"></canvas>
     <div id="home" class="panel">
@@ -120,6 +126,8 @@
       <p class="bank">金币 <b id="homeBank">0</b> · 最高 <b id="homeBest">0</b> m</p>
       <button id="btnStart" class="bigbtn">▶ 开始游戏</button>
       <button id="btnShop" class="bigbtn sub">🛍 商店</button>
+      <button id="btnAch" class="bigbtn sub">🏆 成就</button>
+      <button id="btnTut" class="bigbtn sub">📖 玩法教学</button>
     </div>
     <div id="shop" class="panel" hidden>
       <h2>商店</h2>
@@ -131,8 +139,21 @@
       <h2 id="deathTitle">坠落啦</h2>
       <p class="bank" id="deathStats"></p>
       <button id="btnRetry" class="bigbtn">再来一局</button>
+      <button id="btnShare" class="bigbtn sub">📸 生成战绩图</button>
       <button id="btnDeathShop" class="bigbtn sub">商店</button>
       <button id="btnHome" class="bigbtn sub">回首页</button>
+    </div>
+    <div id="ach" class="panel" hidden>
+      <h2>成就</h2>
+      <div id="achList"></div>
+      <button id="btnAchBack" class="bigbtn sub">返回</button>
+    </div>
+    <div id="share" class="panel" hidden>
+      <h2>战绩图</h2>
+      <img id="shareImg" alt="战绩图">
+      <p class="bank">手机长按图片保存，电脑点下方下载</p>
+      <a id="btnDl" class="bigbtn" download="jump-to-the-moon.png">下载图片</a>
+      <button id="btnShareBack" class="bigbtn sub">返回</button>
     </div>
   </div>
   <div id="hint">←/→ 或 A/D 移动 · 手机按住屏幕左右半边 · M 静音</div>
@@ -143,6 +164,10 @@ const PX_PER_M = 8;          // 8 像素 = 1 米
 const MOON_M = 1500;         // 月球高度
 const GROUND_Y = H - 60;
 const HAZ_WARN = 260;   // 乌云预警距离（px，约 33 米；触发后三角常亮到进场）
+// 风带：按距离固定分布，300m 起每 300m 一片、100m 厚（1500m 前共 4 片），方向每局随机
+const WIND_START_M = 300, WIND_EVERY_M = 300, WIND_THICK_M = 100;
+const WIND_V = [1.6, 2.4, 3.2];   // 微风/大风/狂风（px/帧，按第几片风带递增，第 3 片起封顶）
+const WIND_WARN_M = 45;   // 风带预警距离（米）：进带前这么远就弹横幅+箭头+风声渐起
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -177,6 +202,14 @@ let powerups = [], temp = {magnet: 0, spring: 0, shield: 0};  // 路上捡的限
 let hazards = [];   // 乌云：碰到掉一颗心
 let keys = {left: false, right: false};
 let touchDir = 0; // -1 左 0 无 1 右
+let achT = 0, achQueue = [], achText = '';   // 成就解锁横幅（队列逐个播）
+let zapped = false, shieldSaved = false;     // 本局标记：被乌云劈过 / 护盾救过命（成就用）
+let windDirs = [];         // 每片风带的方向（±1，本局内随机生成后固定）
+let windDrift = 0;         // 当前风漂移速度（px/帧，平滑趋近风力）
+let windBandT = 0, windBandText = '', lastBand = -1;   // 风带进场横幅
+let lastApproach = -1;   // 风带预警去重（每片只预警一次）
+let tutStep = 0, tutCount = 0;                    // 教学：0 学移动 / 1 学跳云 / 2 图鉴
+let startX = 0, tutMinX = 0, tutMaxX = 0;         // 教学第 1 步的左右移动检测
 
 // ---------- 存档 / 商店 ----------
 let screen = 'home';     // home | shop | game
@@ -188,6 +221,7 @@ let ownedSkins = JSON.parse(localStorage.getItem('jtm_skins') || '["yingyan"]');
 let curSkin = localStorage.getItem('jtm_skin') || 'yingyan';
 let ownedItems = JSON.parse(localStorage.getItem('jtm_items') || '{}');
 let equip = JSON.parse(localStorage.getItem('jtm_equip') || '{}');
+let ach = JSON.parse(localStorage.getItem('jtm_ach') || '{}');
 
 const SKINS = [
   {id: 'yingyan', name: '荧焰', price: 0,   c: ['#9ec2ff', '#5b8ff5', '#2f6bf0']},
@@ -217,9 +251,140 @@ function saveMeta() {
   localStorage.setItem('jtm_skin', curSkin);
   localStorage.setItem('jtm_items', JSON.stringify(ownedItems));
   localStorage.setItem('jtm_equip', JSON.stringify(equip));
+  localStorage.setItem('jtm_ach', JSON.stringify(ach));
 }
 
 bestMeters = +(localStorage.getItem('jtm_best') || 0);
+
+// ---------- 成就 ----------
+// 条件在 checkAch() 统一判定；解锁立刻发金币奖励，游戏内弹横幅（队列逐个播）
+const ACH = [
+  {id: 'fly50',    name: '起跳！',   desc: '单局到达 50 米',           reward: 10},
+  {id: 'm500',     name: '冲上云霄', desc: '单局到达 500 米',          reward: 20},
+  {id: 'moon',     name: '登月成功', desc: '到达 1500 米的月亮',       reward: 50},
+  {id: 'm2000',    name: '不止月亮', desc: '通关后继续飞到 2000 米',   reward: 80},
+  {id: 'coin50',   name: '小富翁',   desc: '单局捡到 50 金币',         reward: 30},
+  {id: 'bank500',  name: '理财大师', desc: '存款累计 500 金币',        reward: 50},
+  {id: 'shopper',  name: '第一桶金', desc: '在商店买下第一件商品',     reward: 10},
+  {id: 'zaplive',  name: '雷劈不死', desc: '被乌云劈中后仍活到了结算', reward: 30},
+  {id: 'oneheart', name: '命悬一线', desc: '只剩一颗心时登月',         reward: 100},
+  {id: 'shielded', name: '救命恩人', desc: '触发一次护盾救命',         reward: 20},
+  {id: 'k3',       name: '彩蛋猎人', desc: '发现 716m 的 K3 纪念彩蛋', reward: 30},
+];
+
+function unlock(id) {
+  if (ach[id]) return;
+  const a = ACH.find(x => x.id === id);
+  if (!a) return;
+  ach[id] = true;
+  bank += a.reward;
+  saveMeta();
+  achQueue.push(`🏆 ${a.name}  +${a.reward} 金币`);
+  sfx.cheer();
+}
+
+// 登月 / 结算时各调一次；byThunder 标记是不是被电死的
+function checkAch(byThunder) {
+  const m = Math.floor(meters);
+  if (m >= 50) unlock('fly50');
+  if (m >= 500) unlock('m500');
+  if (meters >= MOON_M) unlock('moon');
+  if (m >= 2000) unlock('m2000');
+  if (coinCount >= 50) unlock('coin50');
+  if (bank >= 500) unlock('bank500');
+  if (zapped && !byThunder) unlock('zaplive');
+  if (meters >= MOON_M && hp === 1) unlock('oneheart');
+  if (shieldSaved) unlock('shielded');
+}
+
+function renderAch() {
+  const list = document.getElementById('achList');
+  list.innerHTML = '';
+  for (const a of ACH) {
+    const got = !!ach[a.id];
+    const row = document.createElement('div');
+    row.className = 'shop-row';
+    row.innerHTML = `<span class="shop-name">${a.name}<small>${a.desc}</small></span>`;
+    const st = document.createElement('span');
+    st.style.cssText = `flex:none;font-size:13px;color:${got ? '#ffd54a' : '#565f89'}`;
+    st.textContent = got ? `✓ +${a.reward}` : '未解锁';
+    row.appendChild(st);
+    list.appendChild(row);
+  }
+}
+
+// ---------- 战绩分享卡：画在离屏 canvas 上，导出 PNG ----------
+function makeShareCard(m, coinsGot, wonFlag) {
+  const c = document.createElement('canvas');
+  c.width = 540; c.height = 720;
+  const x = c.getContext('2d');
+  // 深空背景 + 星星（复用主屏星空坐标，等比映射）
+  let g = x.createLinearGradient(0, 0, 0, 720);
+  g.addColorStop(0, '#0b1030');
+  g.addColorStop(1, '#1c2450');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 540, 720);
+  x.fillStyle = 'rgba(255,255,255,.85)';
+  for (const s of stars) {
+    x.globalAlpha = s.p;
+    x.beginPath();
+    x.arc(s.x / W * 540, s.y / H * 720, s.r, 0, Math.PI * 2);
+    x.fill();
+  }
+  x.globalAlpha = 1;
+  // 月亮 + 光晕（右上）
+  const mg = x.createRadialGradient(432, 128, 18, 432, 128, 112);
+  mg.addColorStop(0, 'rgba(255,246,200,.55)');
+  mg.addColorStop(1, 'rgba(255,246,200,0)');
+  x.fillStyle = mg;
+  x.beginPath(); x.arc(432, 128, 112, 0, Math.PI * 2); x.fill();
+  x.fillStyle = '#f7f3d8';
+  x.beginPath(); x.arc(432, 128, 52, 0, Math.PI * 2); x.fill();
+  x.fillStyle = 'rgba(190,185,150,.5)';
+  for (const [dx, dy, r] of [[-16, -10, 9], [13, 6, 7], [-5, 19, 5], [22, -19, 4]]) {
+    x.beginPath(); x.arc(432 + dx, 128 + dy, r, 0, Math.PI * 2); x.fill();
+  }
+  // 小球：当前皮肤配色 + 同款大眼
+  const sk = SKINS.find(s => s.id === curSkin) || SKINS[0];
+  const bx = 270, by = 250;
+  g = x.createRadialGradient(bx, by, 20, bx, by, 92);
+  g.addColorStop(0, hexA(sk.c[1], 0.5));
+  g.addColorStop(1, hexA(sk.c[1], 0));
+  x.fillStyle = g;
+  x.beginPath(); x.arc(bx, by, 92, 0, Math.PI * 2); x.fill();
+  g = x.createRadialGradient(bx - 12, by - 14, 6, bx, by, 44);
+  g.addColorStop(0, sk.c[0]);
+  g.addColorStop(0.6, sk.c[1]);
+  g.addColorStop(1, sk.c[2]);
+  x.fillStyle = g;
+  x.beginPath(); x.arc(bx, by, 42, 0, Math.PI * 2); x.fill();
+  x.fillStyle = sk.eye || '#fff';
+  for (const ex of [-14, 14]) {
+    x.beginPath(); x.roundRect(bx + ex - 5, by - 16, 10, 19, 5); x.fill();
+  }
+  // 文案
+  x.textAlign = 'center';
+  x.fillStyle = '#e8ecf8';
+  x.font = '700 22px -apple-system, sans-serif';
+  x.fillText('J U M P   T O   T H E   M O O N', 270, 386);
+  x.fillStyle = '#ffd54a';
+  x.font = '800 76px -apple-system, sans-serif';
+  x.fillText(`${m} m`, 270, 486);
+  x.fillStyle = '#9aa7d0';
+  x.font = '500 19px -apple-system, sans-serif';
+  x.fillText(`金币 +${coinsGot} · 最高 ${bestMeters} m`, 270, 530);
+  if (wonFlag) {
+    x.fillStyle = '#ffe9a8';
+    x.font = '700 22px -apple-system, sans-serif';
+    x.fillText('—— 已 到 达 月 球 ——', 270, 574);
+  }
+  x.fillStyle = '#565f89';
+  x.font = '14px -apple-system, sans-serif';
+  const t = new Date();
+  const ymd = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+  x.fillText(`${ymd} · 来玩同款 ljf-0125.github.io/jump-to-the-moon/`, 270, 664);
+  return c;
+}
 
 // ---------- 音效 & 背景音乐（Web Audio 现场合成，无音频文件）----------
 let AC = null, masterGain = null, bgmGain = null;
@@ -266,6 +431,25 @@ function noiseBurst(dur, gain) {
   const g = AC.createGain(); g.gain.value = gain;
   src.connect(f); f.connect(g); g.connect(masterGain);
   src.start();
+}
+
+// 风声：循环白噪声过带通滤波，音量随风力淡入淡出（进/出风带时调用）
+let windSrc = null, windGain = null;
+function setWindAudio(v) {
+  if (!AC) return;
+  if (!windSrc) {
+    const len = AC.sampleRate * 2;
+    const buf = AC.createBuffer(1, len, AC.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    windSrc = AC.createBufferSource();
+    windSrc.buffer = buf; windSrc.loop = true;
+    const f = AC.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 500; f.Q.value = 0.6;
+    windGain = AC.createGain(); windGain.gain.value = 0;
+    windSrc.connect(f); f.connect(windGain); windGain.connect(masterGain);
+    windSrc.start();
+  }
+  windGain.gain.setTargetAtTime(v * 0.05, AC.currentTime, 0.3);
 }
 
 const sfx = {
@@ -367,8 +551,145 @@ function reset() {
   invincibleT = 0;
   shieldUsed = false;
   hp = maxHp = 2 + (equip.heart ? 1 : 0);   // 装备生命之心后每局 3 颗心
+  achT = 0; achQueue = []; achText = '';
+  zapped = false; shieldSaved = false;
+  windDirs = []; windDrift = 0; windBandT = 0; lastBand = -1; lastApproach = -1;   // 风带方向每局重roll
+  setWindAudio(0);
   nextPlatY = GROUND_Y - 85;
   ensurePlatforms();
+}
+
+// ---------- 新手教学 ----------
+// 三步：0 学会移动（真操作检测：左右各飘 60px）→ 1 死不了的跳云练习（踩 5 朵云）→ 2 图鉴速览
+// 完成后 localStorage.jtm_tut='1'，之后点开始游戏直接进正式局
+function startTutorial() {
+  ensureAudio();
+  bounceV = equip.spring ? -12.2 : -11.2;
+  showPanel(null);
+  screen = 'tutorial';
+  tutStep = 0; tutCount = 0;
+  ball = {x: W / 2, y: GROUND_Y - 16, vy: bounceV, vx: 0, r: 16};
+  // 第 1 步地面云：比屏幕还宽一圈（覆盖左右穿屏环绕的瞬间），怎么飘都掉不下去
+  platforms = [{x: -40, y: GROUND_Y, w: W + 80, type: 'n', vx: 0, gone: false, ground: true}];
+  camY = 0; maxAlt = 0; meters = 0; squashT = 0; dead = false;
+  hazards = []; coins = []; powerups = [];
+  won = false; wonT = 0; milestoneT = 0; achT = 0; k3T = 0; k3Fx = []; invincibleT = 0;
+  windDrift = 0; lastBand = -1; lastApproach = -1; setWindAudio(0);
+  startX = W / 2; tutMinX = W / 2; tutMaxX = W / 2;
+  document.getElementById('skipTut').hidden = false;
+}
+
+// 第 2 步的云阵：5 朵宽云小幅度之字向上（间距按可达性公式留足余量）
+function setupTutJump() {
+  const xs = [W / 2 - 60, W / 2 - 10, W / 2 + 40, W / 2 - 20, W / 2 + 30];
+  for (let i = 0; i < 5; i++) {
+    platforms.push({x: xs[i] - 65, y: GROUND_Y - 85 * (i + 1), w: 130, type: 'n', vx: 0, gone: false});
+  }
+}
+
+function finishTutorial() {
+  localStorage.setItem('jtm_tut', '1');
+  document.getElementById('skipTut').hidden = true;
+  startGame();
+}
+
+// 开始游戏入口：没上过课的先去教学
+function startPressed() {
+  if (localStorage.getItem('jtm_tut')) startGame();
+  else startTutorial();
+}
+
+// 教学局主循环：只保留移动/弹跳物理，无乌云无风无金币，掉了弹回（死不了）
+function updateTutorial() {
+  frame++;
+  const left = keys.left || touchDir < 0;
+  const right = keys.right || touchDir > 0;
+  if (left) ball.vx -= 0.65;
+  if (right) ball.vx += 0.65;
+  if (!left && !right) ball.vx *= 0.86;
+  ball.vx = Math.max(-5.2, Math.min(5.2, ball.vx));
+  const prevBottom = ball.y + ball.r;
+  ball.vy += 0.35;
+  ball.x += ball.vx;
+  ball.y += ball.vy;
+  if (ball.x < -ball.r) ball.x = W + ball.r;
+  if (ball.x > W + ball.r) ball.x = -ball.r;
+
+  if (ball.vy > 0) {
+    for (const p of platforms) {
+      if (p.gone) continue;
+      if (prevBottom <= p.y && ball.y + ball.r >= p.y &&
+          ball.x > p.x - ball.r * 0.6 && ball.x < p.x + p.w + ball.r * 0.6) {
+        ball.y = p.y - ball.r;
+        ball.vy = bounceV;
+        squashT = 6;
+        sfx.bounce();
+        if (tutStep === 1 && !p.ground) tutCount++;
+        break;
+      }
+    }
+  }
+  if (squashT > 0) squashT--;
+
+  // 掉出屏幕：教学专属保护，弹回来接着练
+  if (ball.y - camY > H + 50) {
+    ball.y = camY + H * 0.55;
+    ball.vy = bounceV;
+    ball.vx = 0;
+    sfx.shield();
+  }
+  // 只有第 2 步相机才上滚
+  if (tutStep === 1 && ball.y - camY < H * 0.35) camY = ball.y - H * 0.35;
+
+  // 步骤推进
+  if (tutStep === 0) {
+    tutMinX = Math.min(tutMinX, ball.x);
+    tutMaxX = Math.max(tutMaxX, ball.x);
+    if (startX - tutMinX >= 60 && tutMaxX - startX >= 60) {
+      tutStep = 1;
+      setupTutJump();
+      sfx.cheer();
+    }
+  } else if (tutStep === 1 && tutCount >= 5) {
+    tutStep = 2;
+    sfx.cheer();
+  }
+}
+
+// 风带查询：m 高度在第几片风带里（-1 = 无风）
+function windBandAt(m) {
+  if (m < WIND_START_M) return -1;
+  const i = Math.floor(m / WIND_EVERY_M) - 1;
+  return (m - (i + 1) * WIND_EVERY_M < WIND_THICK_M) ? i : -1;
+}
+
+// 风带参数：方向（每局随机）+ 风力（按片数递增）
+function windAt(m) {
+  const i = windBandAt(m);
+  if (i < 0) return null;
+  while (windDirs.length <= i) windDirs.push(Math.random() < 0.5 ? -1 : 1);
+  return {dir: windDirs[i], v: WIND_V[Math.min(i, WIND_V.length - 1)], i};
+}
+
+// 风带预警：距下一片风带底部 <= WIND_WARN_M 且在带外时，返回那片风的参数（否则 null）
+function windApproach(m) {
+  if (windBandAt(m) >= 0) return null;
+  const bottom = (Math.floor(m / WIND_EVERY_M) + 1) * WIND_EVERY_M;
+  return (bottom - m <= WIND_WARN_M) ? windAt(bottom) : null;
+}
+
+// 逐帧估算从高度 m0 上升 gap(px) 这一跳的风漂移总量（px），模型与 update() 完全一致
+// （含漂移爬升和离开风带后的拖尾），生成器靠它把云放到漂移终点
+function windDriftEst(m0, gap) {
+  const tFly = (11.2 + Math.sqrt(Math.max(0, 125.44 - 0.7 * gap))) / 0.35;
+  let dv = 0, total = 0;
+  for (let t = 0; t < tFly; t++) {
+    const y = 11.2 * t - 0.175 * t * t;
+    const w = windAt(m0 + y / PX_PER_M);
+    dv += ((w ? w.dir * w.v : 0) - dv) * 0.08;
+    total += dv;
+  }
+  return total;
 }
 
 // 难度区间：0–200m 简单，200–400m 中等，400–800m 过渡，800m+ 困难
@@ -404,7 +725,14 @@ function ensurePlatforms() {
     const reach = 0.7 * (5.2 * Math.max(0, tFly - 8) + 20.8);                // 横移：极速 5.2、加速段 8 帧/20.8px
     const dxMax = Math.max(18, Math.min(D.dxMax, reach - (w + prevW) / 2 - 8));
     const dxMin = Math.min(30, dxMax * 0.6);
-    const dx = (Math.random() < 0.5 ? -1 : 1) * (dxMin + Math.random() * (dxMax - dxMin));
+    // 风带补偿：逐帧模拟这一跳的真实漂移，云的落点中心放在漂移终点（±22px 抖动）——
+    // 蔚蓝式：顺风是天然路径，顶风靠操作补
+    const prevM = (GROUND_Y - (prev ? prev.y : GROUND_Y)) / PX_PER_M;
+    const drift = windDriftEst(prevM, gap);
+    const wMid = windAt(prevM + gap / PX_PER_M / 2);
+    const dx = drift !== 0
+      ? drift + (Math.random() * 44 - 22)
+      : (Math.random() < 0.5 ? -1 : 1) * (dxMin + Math.random() * (dxMax - dxMin));
     let cx = prevCx + dx;
     cx = ((cx % W) + W) % W; // 左右穿屏环绕
     const x = Math.max(8, Math.min(W - 8 - w, cx - w / 2));
@@ -433,8 +761,8 @@ function ensurePlatforms() {
         taken: false,
       });
     }
-    // 200m 以上按难度概率刷乌云，飘在两朵云之间的空隙里
-    if (D.pHaz && Math.random() < D.pHaz) {
+    // 200m 以上按难度概率刷乌云，飘在两朵云之间的空隙里；风带里不刷（漂移中躲不了，不公平）
+    if (!wMid && D.pHaz && Math.random() < D.pHaz) {
       hazards.push({
         x: 8 + Math.random() * (W - 86),
         y: nextPlatY + gap * 0.5,
@@ -451,6 +779,7 @@ function ensurePlatforms() {
 }
 
 function update() {
+  if (screen === 'tutorial') { updateTutorial(); return; }
   if (screen !== 'game' || dead) return;
   frame++;
   for (const k in temp) if (temp[k] > 0) temp[k]--;   // 限时道具倒计时
@@ -467,11 +796,41 @@ function update() {
   const prevBottom = ball.y + ball.r;
   ball.vy += 0.35;
   ball.x += ball.vx;
+  // 持续风：空中随风漂移（独立位移项，不动 5.2/0.65 手感）；出风带后平滑归零
+  const wNow = windAt(meters);
+  windDrift += ((wNow ? wNow.dir * wNow.v : 0) - windDrift) * 0.08;
+  ball.x += windDrift;
   ball.y += ball.vy;
 
   // 左右穿屏
   if (ball.x < -ball.r) ball.x = W + ball.r;
   if (ball.x > W + ball.r) ball.x = -ball.r;
+
+  // 进/出风带：弹横幅 + 风声淡入淡出
+  const bi = wNow ? wNow.i : -1;
+  if (bi !== lastBand) {
+    if (bi >= 0) {
+      windBandText = `起风了 · ${['微风', '大风', '狂风'][Math.min(bi, 2)]} ${wNow.dir > 0 ? '→' : '←'}`;
+      windBandT = 120;
+    }
+    setWindAudio(wNow ? wNow.v : 0);
+    lastBand = bi;
+  }
+  if (windBandT > 0) windBandT--;
+  // 风带预警：进带前 WIND_WARN_M 米先弹「前方起风」，风声隐约渐起
+  if (bi >= 0) lastApproach = -1;
+  else {
+    const wa = windApproach(meters);
+    const ai = wa ? wa.i : -1;
+    if (ai !== lastApproach) {
+      lastApproach = ai;
+      if (ai >= 0) {
+        windBandText = `前方起风 · ${['微风', '大风', '狂风'][Math.min(ai, 2)]} ${wa.dir > 0 ? '→' : '←'}`;
+        windBandT = 120;
+        setWindAudio(wa.v * 0.35);
+      }
+    }
+  }
 
   // 移动平台：全屏往返漂移；碎云被踩后抖 14 帧再碎（断云预警）
   for (const p of platforms) {
@@ -493,9 +852,10 @@ function update() {
         Math.abs(ball.y - (h.y + 11)) < 12 + ball.r * 0.55) {
       hp--;
       if (hp <= 0) {
-        die('被乌云电到了');
+        die('被乌云电到了', true);
         return;
       }
+      zapped = true;   // 成就：被劈后还活着
       invincibleT = 90;   // 掉心后 1.5 秒无敌，球闪烁，防止一朵云连劈
       sfx.hurt();
     }
@@ -508,6 +868,7 @@ function update() {
       if (prevBottom <= p.y && ball.y + ball.r >= p.y &&
           ball.x > p.x - ball.r * 0.6 && ball.x < p.x + p.w + ball.r * 0.6) {
         ball.y = p.y - ball.r;
+        windDrift = 0;   // 落地后漂移清零，下一跳重新起算
         if (p.type === 'g') {          // 弹簧云：弹射超高，附带 1 秒无敌
           ball.vy = -17;
           squashT = 10;
@@ -558,7 +919,7 @@ function update() {
   // 高度 & 计分
   maxAlt = Math.max(maxAlt, GROUND_Y - ball.y);
   meters = maxAlt / PX_PER_M;
-  if (!won && meters >= MOON_M) { won = true; wonT = 240; sfx.win(); }
+  if (!won && meters >= MOON_M) { won = true; wonT = 240; sfx.win(); checkAch(false); }
   if (wonT > 0) wonT--;
   // 里程碑：每 500m 弹横幅庆祝（1500m 交给登月横幅）
   if (meters >= nextMilestone) {
@@ -570,12 +931,16 @@ function update() {
     nextMilestone += 500;
   }
   if (milestoneT > 0) milestoneT--;
+  // 成就横幅：队列逐个播
+  if (achT > 0) achT--;
+  else if (achQueue.length) { achText = achQueue.shift(); achT = 150; }
 
   // 716m 彩蛋：K3 发布纪念（2026.07.16），彩带烟花 + 纪念横幅
   if (!k3Done && meters >= 716) {
     k3Done = true;
     k3T = 200;
     sfx.k3();
+    unlock('k3');   // 成就：彩蛋猎人
     const colors = ['#ffd54a', '#5b8ff5', '#f58f8f', '#93e07d', '#e0ccff'];
     for (let i = 0; i < 60; i++) {
       const a = Math.random() * Math.PI * 2, v = 1 + Math.random() * 2.6;
@@ -600,6 +965,7 @@ function update() {
     if ((equip.shield && !shieldUsed) || temp.shield > 0) {
       if (equip.shield && !shieldUsed) shieldUsed = true;
       else temp.shield = 0;   // 限时护盾救命后消耗掉
+      shieldSaved = true;   // 成就：护盾救命
       ball.y = camY + H * 0.55;
       ball.vy = temp.spring > 0 ? -12.2 : bounceV;
       ball.vx = 0;
@@ -772,6 +1138,25 @@ function drawHazards() {
   }
 }
 
+// 风线：风带内斜向流动，数量/长度/速度随风力（纯 frame 驱动，无额外状态）
+function drawWind() {
+  const w = windAt(meters);
+  if (!w) return;
+  ctx.strokeStyle = meters > 900 ? 'rgba(255,255,255,.30)' : 'rgba(80,100,145,.32)';
+  ctx.lineWidth = 1.6;
+  const n = 8 + Math.min(w.i, 2) * 5;
+  const speed = (4 + 2.5 * w.v) * w.dir;
+  const len = 12 + 6 * w.v;
+  for (let k = 0; k < n; k++) {
+    const sx = ((k * 97 + frame * speed) % (W + 90) + W + 90) % (W + 90) - 45;
+    const sy = (k * 53) % H;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(sx - w.dir * len, sy + 3);
+    ctx.stroke();
+  }
+}
+
 // 716m 彩蛋彩带：世界坐标，随镜头留在原地
 function drawK3() {
   for (const p of k3Fx) {
@@ -852,6 +1237,38 @@ function drawHUD() {
   ctx.font = '12px -apple-system, sans-serif';
   ctx.textAlign = 'right';
   ctx.fillText(`最高 ${bestMeters} m`, W - 14, 30);
+  // 风向指示：1~3 个小三角指向风向，越多风越大
+  const wHud = windAt(meters);
+  if (wHud) {
+    ctx.fillStyle = meters > 900 ? 'rgba(255,255,255,.8)' : 'rgba(30,40,70,.55)';
+    const n = Math.min(wHud.i, 2) + 1;
+    for (let k = 0; k < n; k++) {
+      const ax = wHud.dir > 0 ? W - 50 + k * 13 : W - 20 - k * 13;
+      ctx.beginPath();
+      ctx.moveTo(ax + 6 * wHud.dir, 52);
+      ctx.lineTo(ax - 3 * wHud.dir, 47);
+      ctx.lineTo(ax - 3 * wHud.dir, 57);
+      ctx.closePath();
+      ctx.fill();
+    }
+  } else {
+    // 风带预警：顶部居中蓝色风向箭头，常闪到进场（乌云红三角同款逻辑）
+    const wa = windApproach(meters);
+    if (wa) {
+      const pulse = 0.55 + 0.45 * Math.sin(frame * 0.25);
+      ctx.fillStyle = `rgba(110,180,255,${pulse})`;
+      const n = Math.min(wa.i, 2) + 1;
+      for (let k = 0; k < n; k++) {
+        const ax = W / 2 + (k - (n - 1) / 2) * 13;
+        ctx.beginPath();
+        ctx.moveTo(ax + 6 * wa.dir, 52);
+        ctx.lineTo(ax - 3 * wa.dir, 47);
+        ctx.lineTo(ax - 3 * wa.dir, 57);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  }
 
   if (wonT > 0) {
     ctx.save();
@@ -875,6 +1292,28 @@ function drawHUD() {
     ctx.font = `700 ${Math.round(26 * pop)}px -apple-system, sans-serif`;
     ctx.textAlign = 'center';
     ctx.fillText(milestoneText, W / 2, 170);
+    ctx.restore();
+  }
+
+  // 风带进场横幅
+  if (windBandT > 0) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, windBandT / 30);
+    ctx.fillStyle = meters > 900 ? '#bfe3ff' : 'rgba(60,80,130,.85)';
+    ctx.font = '600 17px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(windBandText, W / 2, 240);
+    ctx.restore();
+  }
+
+  // 成就解锁横幅
+  if (achT > 0) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, achT / 30);
+    ctx.fillStyle = '#ffd54a';
+    ctx.font = '600 16px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(achText, W / 2, 205);
     ctx.restore();
   }
 
@@ -1067,15 +1506,126 @@ function drawCoins() {
   }
 }
 
+// ---------- 教学绘制 ----------
+function drawTutorial() {
+  ctx.textAlign = 'center';
+  if (tutStep === 0) {
+    ctx.fillStyle = 'rgba(30,40,70,.8)';
+    ctx.font = '700 18px -apple-system, sans-serif';
+    ctx.fillText('第 1 步 · 学会移动', W / 2, 56);
+    // 半屏分割虚线
+    ctx.strokeStyle = 'rgba(30,40,70,.35)';
+    ctx.setLineDash([6, 8]);
+    ctx.beginPath(); ctx.moveTo(W / 2, 90); ctx.lineTo(W / 2, H - 90); ctx.stroke();
+    ctx.setLineDash([]);
+    // 左右示范水波纹（交替相位扩散）
+    for (const [cx, ph] of [[W * 0.25, 0], [W * 0.75, 0.5]]) {
+      const t = (frame * 0.02 + ph) % 1;
+      ctx.strokeStyle = `rgba(47,107,240,${0.5 * (1 - t)})`;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(cx, H * 0.62, 14 + t * 30, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = 'rgba(47,107,240,.25)';
+      ctx.beginPath(); ctx.arc(cx, H * 0.62, 12, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(30,40,70,.8)';
+    ctx.font = '600 16px -apple-system, sans-serif';
+    if ('ontouchstart' in window) {
+      ctx.fillText('按住屏幕左半边 = 向左飘', W / 2, 110);
+      ctx.fillText('按住屏幕右半边 = 向右飘', W / 2, 134);
+    } else {
+      ctx.fillText('按住 ← / → 或 A / D 移动', W / 2, 110);
+    }
+    // 完成度打勾
+    const okL = startX - tutMinX >= 60, okR = tutMaxX - startX >= 60;
+    ctx.font = '600 15px -apple-system, sans-serif';
+    ctx.fillStyle = okL ? '#4fbd55' : 'rgba(30,40,70,.6)';
+    ctx.fillText(`向左飘一段 ${okL ? '✓' : ''}`, W / 2 - 70, H - 130);
+    ctx.fillStyle = okR ? '#4fbd55' : 'rgba(30,40,70,.6)';
+    ctx.fillText(`向右飘一段 ${okR ? '✓' : ''}`, W / 2 + 70, H - 130);
+  } else if (tutStep === 1) {
+    ctx.fillStyle = 'rgba(30,40,70,.8)';
+    ctx.font = '700 18px -apple-system, sans-serif';
+    ctx.fillText('第 2 步 · 踩着云往上跳', W / 2, 56);
+    ctx.font = '600 15px -apple-system, sans-serif';
+    ctx.fillText('掉下去也没事，会把你弹回来', W / 2, 82);
+    ctx.fillText(`云朵 ${Math.min(tutCount, 5)} / 5`, W / 2, 108);
+  } else {
+    drawTutGallery();
+  }
+  ctx.textAlign = 'left';
+}
+
+// 图鉴速览：全部用游戏里的真实绘制函数画图标
+function drawTutGallery() {
+  ctx.fillStyle = 'rgba(11,16,48,.88)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#e8ecf8';
+  ctx.font = '700 20px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('图鉴速览', W / 2, 48);
+  const rows = [
+    {type: 'n', text: '白云 · 普通，放心踩'},
+    {type: 'm', text: '蓝云 · 会来回跑'},
+    {type: 'b', text: '棕云 · 踩上抖两下就碎'},
+    {type: 'g', text: '绿云 · 弹簧，弹射超高'},
+    {type: 'd', text: '乌云 · 危险！劈掉一颗心'},
+    {pu: 'magnet', text: '道具球 · 磁/弹/盾，生效 10 秒'},
+    {heart: true, text: '红心 · 回一颗心'},
+    {wind: true, text: '风带 · 会被吹偏，顺风借势'},
+  ];
+  ctx.textAlign = 'left';
+  for (let i = 0; i < rows.length; i++) {
+    const y = 92 + i * 52;
+    const r = rows[i];
+    if (r.type) {
+      drawCloud({x: 36, w: 62, type: r.type}, y - 16);
+    } else if (r.pu) {
+      const st = PU_STYLE[r.pu];
+      const g2 = ctx.createRadialGradient(57, y - 4, 2, 60, y, 12);
+      g2.addColorStop(0, st.c[0]);
+      g2.addColorStop(1, st.c[1]);
+      ctx.fillStyle = g2;
+      ctx.beginPath(); ctx.arc(60, y, 11, 0, Math.PI * 2); ctx.fill();
+      drawPowerupIcon(r.pu, 60, y, 1, st.c[1]);
+    } else if (r.heart) {
+      ctx.save();
+      ctx.translate(60, y);
+      const g3 = ctx.createLinearGradient(0, -9, 0, 5);
+      g3.addColorStop(0, '#ff8fa3');
+      g3.addColorStop(1, '#e0436b');
+      ctx.fillStyle = g3;
+      heartPath(1.15);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.strokeStyle = 'rgba(160,200,255,.8)';
+      ctx.lineWidth = 1.8;
+      for (const yy of [-7, 0, 7]) {
+        ctx.beginPath(); ctx.moveTo(42, y + yy); ctx.lineTo(78, y + yy - 3); ctx.stroke();
+      }
+    }
+    ctx.fillStyle = '#c6cfe8';
+    ctx.font = '500 14px -apple-system, sans-serif';
+    ctx.fillText(r.text, 116, y + 5);
+  }
+  const blink = 0.6 + 0.4 * Math.sin(frame * 0.1);
+  ctx.fillStyle = `rgba(255,233,168,${blink})`;
+  ctx.font = '700 17px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('点击任意处，出发登月！', W / 2, H - 42);
+  ctx.textAlign = 'left';
+}
+
 function draw() {
   drawBackground();
+  drawWind();
   drawPlatforms();
   drawHazards();
   drawCoins();
   drawPowerups();
   drawBall();
   drawK3();
-  drawHUD();
+  if (screen === 'tutorial') drawTutorial(); else drawHUD();
 }
 
 function loop() {
@@ -1094,7 +1644,8 @@ document.addEventListener('keydown', e => {
   else if (k === 'm') toggleMute();
   else if (k === ' ') {
     e.preventDefault();
-    if (screen === 'home' || (screen === 'game' && dead)) startGame();
+    if (screen === 'tutorial' && tutStep === 2) finishTutorial();
+    else if (screen === 'home' || (screen === 'game' && dead)) startPressed();
   }
 });
 document.addEventListener('keyup', e => {
@@ -1110,8 +1661,12 @@ function touchPos(e) {
 canvas.addEventListener('touchstart', e => {
   e.preventDefault();
   ensureAudio();
+  if (screen === 'tutorial' && tutStep === 2) { finishTutorial(); return; }
   touchDir = touchPos(e) < W / 2 ? -1 : 1;
 }, {passive: false});
+canvas.addEventListener('click', () => {   // 桌面端图鉴页点鼠标也出发
+  if (screen === 'tutorial' && tutStep === 2) finishTutorial();
+});
 canvas.addEventListener('touchmove', e => {
   e.preventDefault();
   if (!dead) touchDir = touchPos(e) < W / 2 ? -1 : 1;
@@ -1128,6 +1683,8 @@ const panels = {
   home: document.getElementById('home'),
   shop: document.getElementById('shop'),
   death: document.getElementById('death'),
+  ach: document.getElementById('ach'),
+  share: document.getElementById('share'),
 };
 
 function showPanel(name) {
@@ -1146,7 +1703,7 @@ function startGame() {
   reset();
 }
 
-function die(reason) {
+function die(reason, byThunder) {
   dead = true;
   sfx.fall();
   bank += coinCount;
@@ -1154,6 +1711,7 @@ function die(reason) {
   if (m > bestMeters) bestMeters = m;
   localStorage.setItem('jtm_best', bestMeters);
   saveMeta();
+  checkAch(!!byThunder);
   document.getElementById('deathTitle').textContent = reason || '坠落啦';
   document.getElementById('deathStats').textContent =
     `本次 ${m} m · 金币 +${coinCount} · 存款 ${bank}`;
@@ -1190,7 +1748,7 @@ function renderShop() {
         bank -= s.price;
         ownedSkins.push(s.id);
         curSkin = s.id;
-        saveMeta(); renderShop(); sfx.coin();
+        saveMeta(); unlock('shopper'); renderShop(); sfx.coin();
       };
     }
     row.appendChild(b);
@@ -1222,7 +1780,7 @@ function renderShop() {
         bank -= it.price;
         ownedItems[it.id] = true;
         equip[it.id] = true;
-        saveMeta(); renderShop(); sfx.coin();
+        saveMeta(); unlock('shopper'); renderShop(); sfx.coin();
       };
     }
     row.appendChild(b);
@@ -1230,12 +1788,23 @@ function renderShop() {
   }
 }
 
-document.getElementById('btnStart').onclick = startGame;
+document.getElementById('btnStart').onclick = startPressed;
 document.getElementById('btnShop').onclick = () => { ensureAudio(); screen = 'shop'; renderShop(); showPanel('shop'); };
 document.getElementById('btnBack').onclick = () => { screen = 'home'; showPanel('home'); };
 document.getElementById('btnRetry').onclick = startGame;
 document.getElementById('btnDeathShop').onclick = () => { screen = 'shop'; renderShop(); showPanel('shop'); };
 document.getElementById('btnHome').onclick = () => { screen = 'home'; reset(); showPanel('home'); };
+document.getElementById('btnAch').onclick = () => { ensureAudio(); renderAch(); showPanel('ach'); };
+document.getElementById('btnAchBack').onclick = () => showPanel('home');
+document.getElementById('btnTut').onclick = () => { startTutorial(); };
+document.getElementById('skipTut').onclick = () => { finishTutorial(); };
+document.getElementById('btnShare').onclick = () => {
+  const url = makeShareCard(Math.floor(meters), coinCount, won).toDataURL('image/png');
+  document.getElementById('shareImg').src = url;
+  document.getElementById('btnDl').href = url;
+  showPanel('share');
+};
+document.getElementById('btnShareBack').onclick = () => showPanel('death');
 
 reset();
 showPanel('home');
