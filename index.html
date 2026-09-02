@@ -1,0 +1,1193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Jump to the Moon</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0b1030;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    touch-action: none;
+    user-select: none;
+    overflow: hidden;
+  }
+  canvas {
+    border-radius: 12px;
+    box-shadow: 0 8px 40px rgba(0,0,0,.5);
+    max-width: 94vw;
+    max-height: 82vh;
+  }
+  #hint { color: #565f89; font-size: 12px; margin-top: 10px; }
+  #mutebtn { position: fixed; top: 12px; right: 14px; z-index: 9; cursor: pointer;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15);
+    border-radius: 8px; font-size: 17px; padding: 5px 9px; }
+  #wrap { position: relative; }
+  .panel[hidden] { display: none; }  /* display:flex 会盖掉 hidden 属性，必须显式补回 */
+  .panel { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px; border-radius: 12px;
+    background: rgba(11,16,48,.78); backdrop-filter: blur(8px); color: #e8ecf8;
+    text-align: center; padding: 20px; }
+  .panel h2 { font-size: 22px; font-weight: 600; }
+  .bank { color: #9aa7d0; font-size: 14px; }
+  .bank b { color: #ffd54a; }
+  .bigbtn { width: 200px; padding: 13px 0; font-size: 17px; font-weight: 600; color: #fff;
+    background: linear-gradient(160deg, #5b8ff5, #2f6bf0); border: none; border-radius: 12px; cursor: pointer;
+    box-shadow: 0 6px 18px rgba(47,107,240,.4); }
+  .bigbtn:hover { filter: brightness(1.08); }
+  .bigbtn.sub { background: rgba(255,255,255,.12); font-weight: 500; box-shadow: none; }
+  .bigbtn:active { transform: scale(.96); }
+  /* ---- 首页：星空 + 立体月亮 + 悬浮小球 ---- */
+  #home { background: linear-gradient(180deg, rgba(13,18,48,.96), rgba(8,11,32,.98)); }
+  #home .star { position: absolute; width: 2px; height: 2px; border-radius: 50%; background: #fff;
+    animation: twinkle 2.4s ease-in-out infinite; }
+  .home-cloud { position: absolute; width: 220px; height: 70px; border-radius: 50%;
+    background: radial-gradient(ellipse, rgba(200,215,245,.14), transparent 70%); filter: blur(6px); }
+  @keyframes twinkle { 0%, 100% { opacity: .12; } 50% { opacity: .9; } }
+  .scene { position: relative; width: 220px; height: 190px; flex: none; }
+  /* 终点同款月亮：奶黄平面圆 + 暖光晕 + 4 个平底陨石坑（按游戏内 r=70 等比放大） */
+  .moon3d { position: absolute; left: 55px; top: 66px; width: 110px; height: 110px; border-radius: 50%; z-index: 2;
+    background: #f7f3d8; box-shadow: 0 0 60px rgba(255,246,200,.55); overflow: hidden; }
+  .moon3d .crater { position: absolute; border-radius: 50%; background: rgba(190,185,150,.5); }
+  .moon3d .crater:nth-child(1) { left: 28px; top: 35px; width: 19px; height: 19px; }
+  .moon3d .crater:nth-child(2) { left: 62px; top: 54px; width: 14px; height: 14px; }
+  .moon3d .crater:nth-child(3) { left: 45px; top: 70px; width: 11px; height: 11px; }
+  .moon3d .crater:nth-child(4) { left: 74px; top: 30px; width: 9px; height: 9px; }
+  .hero { position: absolute; left: 82px; top: 30px; width: 56px; height: 56px; border-radius: 50%; z-index: 1;
+    background: radial-gradient(circle at 35% 30%, #9ec2ff, #5b8ff5 60%, #2f6bf0);
+    box-shadow: 0 0 22px rgba(91,143,245,.85), 0 0 60px rgba(91,143,245,.4);
+    animation: floaty 3.4s ease-in-out infinite; }
+  .hero::after { content: ''; position: absolute; inset: -14px; border-radius: 50%; z-index: -1;
+    background: radial-gradient(circle, rgba(91,143,245,.35), transparent 70%);
+    animation: glowPulse 3.4s ease-in-out infinite; }
+  @keyframes floaty { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+  @keyframes glowPulse { 0%, 100% { opacity: .7; } 50% { opacity: 1; } }
+  .hero .eye { position: absolute; top: 20px; width: 9px; height: 14px; border-radius: 5px; background: #fff; }
+  .hero .eye:first-child { left: 16px; }
+  .hero .eye:last-child { left: 31px; }
+  .title-block { position: relative; line-height: 1.05; }
+  .t-big { font-size: 34px; font-weight: 800; letter-spacing: 1px; }
+  .t-mid { font-size: 13px; color: #aab6e0; letter-spacing: 4px; margin: 3px 0; }
+  .t-star { position: absolute; color: #ffd54a; font-size: 12px; animation: twinkle 1.8s ease-in-out infinite; }
+  .t-star.s1 { left: -24px; top: 10px; }
+  .t-star.s2 { right: -20px; bottom: 16px; animation-delay: .9s; }
+  #shopList { width: 100%; max-width: 320px; max-height: 46vh; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 8px; }
+  .shop-cat { color: #9aa7d0; font-size: 12px; letter-spacing: 2px; margin-top: 6px; text-align: left; }
+  .shop-row { display: flex; align-items: center; gap: 10px;
+    background: rgba(255,255,255,.06); border-radius: 10px; padding: 9px 12px; }
+  .shop-name { flex: 1; text-align: left; font-size: 14px; }
+  .shop-name small { display: block; color: #8b96bd; font-size: 11px; margin-top: 2px; }
+  .mini-ball { width: 22px; height: 22px; border-radius: 50%; flex: none; }
+  .shop-btn { flex: none; min-width: 76px; padding: 7px 10px; font-size: 13px; border: none;
+    border-radius: 8px; background: linear-gradient(160deg, #5b8ff5, #2f6bf0); color: #fff; cursor: pointer; }
+  .shop-btn:disabled { background: rgba(255,255,255,.12); color: #8b96bd; cursor: default; }
+</style>
+</head>
+<body>
+  <button id="mutebtn" title="静音 (M)">🔊</button>
+  <div id="wrap">
+    <canvas id="game" width="420" height="640"></canvas>
+    <div id="home" class="panel">
+      <span class="star" style="left:8%;top:14%"></span>
+      <span class="star" style="left:16%;top:72%;animation-delay:.6s"></span>
+      <span class="star" style="left:84%;top:10%;animation-delay:1.2s"></span>
+      <span class="star" style="left:90%;top:64%;animation-delay:.3s"></span>
+      <span class="star" style="left:70%;top:86%;animation-delay:1.5s"></span>
+      <span class="star" style="left:26%;top:22%;animation-delay:.9s"></span>
+      <span class="star" style="left:78%;top:34%;animation-delay:1.8s"></span>
+      <span class="star" style="left:12%;top:44%;animation-delay:2.1s"></span>
+      <span class="star" style="left:62%;top:6%;animation-delay:.4s"></span>
+      <span class="star" style="left:36%;top:90%;animation-delay:1.1s"></span>
+      <span class="home-cloud" style="left:-46px;bottom:-26px"></span>
+      <span class="home-cloud" style="right:-52px;bottom:-16px"></span>
+      <div class="scene">
+        <div class="moon3d"><span class="crater"></span><span class="crater"></span><span class="crater"></span><span class="crater"></span></div>
+        <div class="hero"><span class="eye"></span><span class="eye"></span></div>
+      </div>
+      <div class="title-block">
+        <span class="t-star s1">✦</span><span class="t-star s2">✦</span>
+        <div class="t-big">Jump</div>
+        <div class="t-mid">to the</div>
+        <div class="t-big">Moon</div>
+      </div>
+      <p class="bank">金币 <b id="homeBank">0</b> · 最高 <b id="homeBest">0</b> m</p>
+      <button id="btnStart" class="bigbtn">▶ 开始游戏</button>
+      <button id="btnShop" class="bigbtn sub">🛍 商店</button>
+    </div>
+    <div id="shop" class="panel" hidden>
+      <h2>商店</h2>
+      <p class="bank">金币 <b id="shopBank">0</b></p>
+      <div id="shopList"></div>
+      <button id="btnBack" class="bigbtn sub">返回</button>
+    </div>
+    <div id="death" class="panel" hidden>
+      <h2 id="deathTitle">坠落啦</h2>
+      <p class="bank" id="deathStats"></p>
+      <button id="btnRetry" class="bigbtn">再来一局</button>
+      <button id="btnDeathShop" class="bigbtn sub">商店</button>
+      <button id="btnHome" class="bigbtn sub">回首页</button>
+    </div>
+  </div>
+  <div id="hint">←/→ 或 A/D 移动 · 手机按住屏幕左右半边 · M 静音</div>
+
+<script>
+const W = 420, H = 640;
+const PX_PER_M = 8;          // 8 像素 = 1 米
+const MOON_M = 1500;         // 月球高度
+const GROUND_Y = H - 60;
+const HAZ_WARN = 260;   // 乌云预警距离（px，约 33 米；触发后三角常亮到进场）
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+// 高分屏适配：按 devicePixelRatio 放大画布实际像素，逻辑坐标仍是 420×640
+// 不放大的话手机上 CSS 拉伸 420×640 的位图会糊
+const DPR = Math.min(window.devicePixelRatio || 1, 3);
+canvas.width = W * DPR;
+canvas.height = H * DPR;
+ctx.scale(DPR, DPR);
+
+// 老浏览器没有 roundRect，补一个
+if (!ctx.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+    this.moveTo(x + r, y);
+    this.arcTo(x + w, y, x + w, y + h, r);
+    this.arcTo(x + w, y + h, x, y + h, r);
+    this.arcTo(x, y + h, x, y, r);
+    this.arcTo(x, y, x + w, y, r);
+    this.closePath();
+    return this;
+  };
+}
+
+let ball, platforms, camY, nextPlatY, bestMeters, dead, won, wonT, squashT, meters, maxAlt;
+let milestoneT = 0, nextMilestone = 500, milestoneText = '';
+let k3Fx = [], k3T = 0, k3Done = false;   // 716m K3 发布纪念彩蛋
+let invincibleT = 0;   // 弹簧云弹射后的无敌帧数（碰到乌云不死）
+let coins = [], coinCount = 0, frame = 0;
+let powerups = [], temp = {magnet: 0, spring: 0, shield: 0};  // 路上捡的限时道具，temp 存剩余帧数
+let hazards = [];   // 乌云：碰到即死
+let keys = {left: false, right: false};
+let touchDir = 0; // -1 左 0 无 1 右
+
+// ---------- 存档 / 商店 ----------
+let screen = 'home';     // home | shop | game
+let bounceV = -11.2;     // 弹簧鞋会调高
+let shieldUsed = false;
+
+let bank = +(localStorage.getItem('jtm_bank') || 0);
+let ownedSkins = JSON.parse(localStorage.getItem('jtm_skins') || '["yingyan"]');
+let curSkin = localStorage.getItem('jtm_skin') || 'yingyan';
+let ownedItems = JSON.parse(localStorage.getItem('jtm_items') || '{}');
+let equip = JSON.parse(localStorage.getItem('jtm_equip') || '{}');
+
+const SKINS = [
+  {id: 'yingyan', name: '荧焰', price: 0,   c: ['#9ec2ff', '#5b8ff5', '#2f6bf0']},
+  {id: 'duanpo',  name: '断魄', price: 30,  c: ['#ffc9c9', '#f58f8f', '#e05757']},
+  {id: 'zhejing', name: '折镜', price: 50,  c: ['#ffffff', '#e2e8f5', '#aeb9d4'], eye: '#3a4460'},
+  {id: 'tongbi',  name: '通碧', price: 80,  c: ['#d8f7b0', '#93e07d', '#4fbd55']},
+  {id: 'zhui',    name: '坠明', price: 150, c: ['#e0ccff', '#b08ff5', '#835bf0']},
+];
+
+// 旧版皮肤 id 迁移到角色 id
+const OLD_SKIN_MAP = {blue: 'yingyan', pink: 'duanpo', green: 'tongbi', purple: 'zhui'};
+ownedSkins = [...new Set(ownedSkins.map(id => OLD_SKIN_MAP[id] || id))]
+  .filter(id => SKINS.some(s => s.id === id));
+if (!ownedSkins.includes('yingyan')) ownedSkins.push('yingyan');
+curSkin = OLD_SKIN_MAP[curSkin] || curSkin;
+if (!ownedSkins.includes(curSkin)) curSkin = 'yingyan';
+const ITEMS = [
+  {id: 'magnet', name: '金币磁铁', price: 80,  desc: '附近 70px 的金币会被吸过来'},
+  {id: 'spring', name: '弹簧鞋底', price: 100, desc: '跳得更高一点'},
+  {id: 'shield', name: '月光护盾', price: 150, desc: '每局一次，坠落时自动弹回'},
+];
+
+function saveMeta() {
+  localStorage.setItem('jtm_bank', bank);
+  localStorage.setItem('jtm_skins', JSON.stringify(ownedSkins));
+  localStorage.setItem('jtm_skin', curSkin);
+  localStorage.setItem('jtm_items', JSON.stringify(ownedItems));
+  localStorage.setItem('jtm_equip', JSON.stringify(equip));
+}
+
+bestMeters = +(localStorage.getItem('jtm_best') || 0);
+
+// ---------- 音效 & 背景音乐（Web Audio 现场合成，无音频文件）----------
+let AC = null, masterGain = null, bgmGain = null;
+let muted = localStorage.getItem('jtm_mute') === '1';
+
+function ensureAudio() {
+  if (!AC) {
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return;
+    AC = new Ctor();
+    masterGain = AC.createGain();
+    masterGain.gain.value = muted ? 0 : 1;
+    masterGain.connect(AC.destination);
+    bgmGain = AC.createGain();
+    bgmGain.connect(masterGain);
+    startBGM();
+  }
+  if (AC.state === 'suspended') AC.resume();
+}
+
+// 单个合成音：频率、时长、波形、音量、滑音、延迟
+function tone(freq, dur, type, gain, slide, delay) {
+  if (!AC) return;
+  const t0 = AC.currentTime + (delay || 0);
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type || 'sine';
+  o.frequency.setValueAtTime(freq, t0);
+  if (slide) o.frequency.exponentialRampToValueAtTime(slide, t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(gain, t0 + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g); g.connect(masterGain);
+  o.start(t0); o.stop(t0 + dur + 0.05);
+}
+
+function noiseBurst(dur, gain) {
+  if (!AC) return;
+  const len = Math.floor(AC.sampleRate * dur);
+  const buf = AC.createBuffer(1, len, AC.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  const src = AC.createBufferSource(); src.buffer = buf;
+  const f = AC.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 800;
+  const g = AC.createGain(); g.gain.value = gain;
+  src.connect(f); f.connect(g); g.connect(masterGain);
+  src.start();
+}
+
+const sfx = {
+  bounce() { tone(300 + Math.random() * 60, 0.13, 'triangle', 0.20, 620); },
+  crack()  { tone(180, 0.10, 'square', 0.10, 90); noiseBurst(0.1, 0.15); },
+  coin()   { tone(988, 0.07, 'square', 0.09); tone(1319, 0.16, 'square', 0.09, null, 0.06); },
+  shield() { tone(520, 0.25, 'triangle', 0.18, 1040); },
+  power()  { tone(660, 0.09, 'square', 0.12, 990); tone(990, 0.14, 'square', 0.10, null, 0.07); },
+  spring() { tone(380, 0.2, 'square', 0.16, 950); },
+  thunder(){ tone(110, 0.35, 'sawtooth', 0.12, 55); noiseBurst(0.2, 0.08); },
+  cheer()  { tone(784, 0.12, 'triangle', 0.14); tone(1047, 0.22, 'triangle', 0.13, null, 0.09); },
+  k3()     { [659, 784, 1047, 1319].forEach((f, i) => tone(f, 0.3, 'triangle', 0.13, null, i * 0.09)); },
+  win()    { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.4, 'triangle', 0.16, null, i * 0.13)); },
+  fall()   { tone(420, 0.6, 'sawtooth', 0.10, 70); },
+};
+
+// 背景音乐：C 大调慢板，垫底和弦 + 五声音阶随机拨音
+const CHORDS = [
+  [261.6, 329.6, 392.0],  // C
+  [220.0, 261.6, 329.6],  // Am
+  [174.6, 220.0, 261.6],  // F
+  [196.0, 246.9, 293.7],  // G
+];
+const PENTA = [261.6, 293.7, 329.6, 392.0, 440.0, 523.3, 587.3];
+let bgmNext = 0, bgmBeat = 0;
+
+function startBGM() {
+  bgmNext = AC.currentTime + 0.1;
+  bgmBeat = 0;
+  setInterval(scheduleBGM, 150);
+}
+
+function scheduleBGM() {
+  if (!AC || AC.state !== 'running') return;
+  while (bgmNext < AC.currentTime + 0.4) {
+    const t = bgmNext;
+    if (bgmBeat % 4 === 0) padChord(CHORDS[Math.floor(bgmBeat / 4) % CHORDS.length], t);
+    if (bgmBeat % 2 === 1 && Math.random() < 0.6) pluck(PENTA[(Math.random() * PENTA.length) | 0], t);
+    bgmNext += 0.6;
+    bgmBeat++;
+  }
+}
+
+function padChord(freqs, t) {
+  for (const f of freqs) {
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = 'triangle';
+    o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.035, t + 0.6);
+    g.gain.linearRampToValueAtTime(0.0001, t + 2.4);
+    o.connect(g); g.connect(bgmGain);
+    o.start(t); o.stop(t + 2.5);
+  }
+}
+
+function pluck(f, t) {
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = 'sine';
+  o.frequency.value = f;
+  g.gain.setValueAtTime(0.06, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
+  o.connect(g); g.connect(bgmGain);
+  o.start(t); o.stop(t + 0.6);
+}
+
+function toggleMute() {
+  muted = !muted;
+  localStorage.setItem('jtm_mute', muted ? '1' : '0');
+  if (masterGain) masterGain.gain.value = muted ? 0 : 1;
+  document.getElementById('mutebtn').textContent = muted ? '🔇' : '🔊';
+}
+
+// 切到后台时暂停音乐，回来继续
+document.addEventListener('visibilitychange', () => {
+  if (!AC) return;
+  if (document.hidden) AC.suspend(); else AC.resume();
+});
+
+// 星星（屏幕空间，带视差）
+const stars = [];
+for (let i = 0; i < 90; i++) {
+  stars.push({x: Math.random() * W, y: Math.random() * H, r: Math.random() * 1.5 + 0.4, p: Math.random() * 0.5 + 0.2});
+}
+
+function reset() {
+  ball = {x: W / 2, y: GROUND_Y - 16, vy: bounceV, vx: 0, r: 16};
+  platforms = [{x: W / 2 - 55, y: GROUND_Y, w: 110, type: 'n', vx: 0, gone: false}];
+  camY = 0;
+  maxAlt = 0; meters = 0;
+  coins = []; coinCount = 0;
+  powerups = []; temp = {magnet: 0, spring: 0, shield: 0};
+  hazards = [];
+  dead = false; won = false; wonT = 0; squashT = 0;
+  milestoneT = 0; nextMilestone = 500; milestoneText = '';
+  k3Fx = []; k3T = 0; k3Done = false;
+  invincibleT = 0;
+  shieldUsed = false;
+  nextPlatY = GROUND_Y - 85;
+  ensurePlatforms();
+}
+
+// 难度区间：0–200m 简单，200–400m 中等，400–800m 过渡，800m+ 困难
+function difficulty() {
+  if (meters < 200) {
+    return {gapMin: 60, gapMax: 85, dxMax: 130, wMin: 72, wVar: 16, pMove: 0, pBreak: 0, vMove: 0.8, pHaz: 0, pSpring: 0.05};
+  } else if (meters < 400) {
+    return {gapMin: 70, gapMax: 100, dxMax: 155, wMin: 66, wVar: 14, pMove: 0.20, pBreak: 0, vMove: 1.1, pHaz: 0.06, pSpring: 0.05};
+  } else if (meters < 800) {
+    const t = (meters - 400) / 400;
+    return {
+      gapMin: 70 + 15 * t, gapMax: 100 + 15 * t,
+      dxMax: 155 + 20 * t,
+      wMin: 66 - 8 * t, wVar: 14 - 2 * t,
+      pMove: 0.20 + 0.10 * t, pBreak: 0.12 * t, vMove: 1.1 + 0.7 * t,
+      pHaz: 0.06 + 0.04 * t, pSpring: 0.05,
+    };
+  }
+  return {gapMin: 85, gapMax: 115, dxMax: 175, wMin: 58, wVar: 12, pMove: 0.30, pBreak: 0.12, vMove: 1.8, pHaz: 0.10, pSpring: 0.05};
+}
+
+function ensurePlatforms() {
+  while (nextPlatY > camY - 120) {
+    const D = difficulty();
+    const gap = D.gapMin + Math.random() * (D.gapMax - D.gapMin);
+    nextPlatY -= gap;
+    const w = D.wMin + Math.random() * D.wVar;
+    // 水平偏移：之字形展开；上限 = 这一跳物理可达距离(留 30% 余量) − 两朵云宽度
+    const prev = platforms[platforms.length - 1];
+    const prevCx = prev ? prev.x + prev.w / 2 : W / 2;
+    const prevW = prev ? prev.w : w;
+    const tFly = (11.2 + Math.sqrt(Math.max(0, 125.44 - 0.7 * gap))) / 0.35; // 上升 gap 后落回同高度的总帧数
+    const reach = 0.7 * (5.2 * Math.max(0, tFly - 8) + 20.8);                // 横移：极速 5.2、加速段 8 帧/20.8px
+    const dxMax = Math.max(18, Math.min(D.dxMax, reach - (w + prevW) / 2 - 8));
+    const dxMin = Math.min(30, dxMax * 0.6);
+    const dx = (Math.random() < 0.5 ? -1 : 1) * (dxMin + Math.random() * (dxMax - dxMin));
+    let cx = prevCx + dx;
+    cx = ((cx % W) + W) % W; // 左右穿屏环绕
+    const x = Math.max(8, Math.min(W - 8 - w, cx - w / 2));
+    let type = 'n', vx = 0;
+    const r = Math.random();
+    if (r < D.pBreak) type = 'b';
+    else if (r < D.pBreak + D.pMove) {
+      type = 'm';
+      vx = (Math.random() < 0.5 ? -1 : 1) * D.vMove * (0.7 + Math.random() * 0.6);
+    } else if (r < D.pBreak + D.pMove + D.pSpring) type = 'g';
+    platforms.push({x, y: nextPlatY, w, type, vx, gone: false});
+    // 35% 概率在云朵上方飘一枚金币；没出金币时 12% 概率换成限时道具
+    if (Math.random() < 0.35) {
+      coins.push({
+        x: x + w / 2 + (Math.random() * 32 - 16),
+        y: nextPlatY - 34 - Math.random() * 16,
+        ph: Math.random() * Math.PI * 2,
+        taken: false,
+      });
+    } else if (Math.random() < 0.12) {
+      powerups.push({
+        x: x + w / 2 + (Math.random() * 24 - 12),
+        y: nextPlatY - 38 - Math.random() * 14,
+        kind: ['magnet', 'spring', 'shield'][(Math.random() * 3) | 0],
+        ph: Math.random() * Math.PI * 2,
+        taken: false,
+      });
+    }
+    // 200m 以上按难度概率刷乌云，飘在两朵云之间的空隙里
+    if (D.pHaz && Math.random() < D.pHaz) {
+      hazards.push({
+        x: 8 + Math.random() * (W - 86),
+        y: nextPlatY + gap * 0.5,
+        w: 70,
+        vx: (Math.random() < 0.5 ? -1 : 1) * (1.2 + Math.random() * 0.8),
+      });
+    }
+  }
+  // 清理已碎和掉出屏幕底部的平台
+  platforms = platforms.filter(p => !p.gone && p.y - camY < H + 60);
+  coins = coins.filter(c => !c.taken && c.y - camY < H + 60);
+  powerups = powerups.filter(p => !p.taken && p.y - camY < H + 60);
+  hazards = hazards.filter(h => h.y - camY < H + 60);
+}
+
+function update() {
+  if (screen !== 'game' || dead) return;
+  frame++;
+  for (const k in temp) if (temp[k] > 0) temp[k]--;   // 限时道具倒计时
+  if (invincibleT > 0) invincibleT--;
+
+  // 水平控制
+  const left = keys.left || touchDir < 0;
+  const right = keys.right || touchDir > 0;
+  if (left) ball.vx -= 0.65;
+  if (right) ball.vx += 0.65;
+  if (!left && !right) ball.vx *= 0.86;
+  ball.vx = Math.max(-5.2, Math.min(5.2, ball.vx));
+
+  const prevBottom = ball.y + ball.r;
+  ball.vy += 0.35;
+  ball.x += ball.vx;
+  ball.y += ball.vy;
+
+  // 左右穿屏
+  if (ball.x < -ball.r) ball.x = W + ball.r;
+  if (ball.x > W + ball.r) ball.x = -ball.r;
+
+  // 移动平台：全屏往返漂移；碎云被踩后抖 14 帧再碎（断云预警）
+  for (const p of platforms) {
+    if (p.type === 'm') {
+      p.x += p.vx;
+      if (p.x < 8 || p.x + p.w > W - 8) p.vx *= -1;
+    }
+    if (p.shake > 0 && --p.shake === 0) p.gone = true;
+  }
+
+  // 乌云：往返漂移，碰到即死；即将进入屏幕时预警一次
+  for (const h of hazards) {
+    h.x += h.vx;
+    if (h.x < 8 || h.x + h.w > W - 8) h.vx *= -1;
+    const hsy = h.y - camY;
+    if (!h.warned && hsy < 0 && hsy > -HAZ_WARN) { h.warned = true; sfx.thunder(); }
+    if (invincibleT === 0 &&
+        Math.abs(ball.x - (h.x + h.w / 2)) < h.w / 2 * 0.85 + ball.r * 0.55 &&
+        Math.abs(ball.y - (h.y + 11)) < 12 + ball.r * 0.55) {
+      die('被乌云电到了');
+      return;
+    }
+  }
+
+  // 下落时踩平台
+  if (ball.vy > 0) {
+    for (const p of platforms) {
+      if (p.gone) continue;
+      if (prevBottom <= p.y && ball.y + ball.r >= p.y &&
+          ball.x > p.x - ball.r * 0.6 && ball.x < p.x + p.w + ball.r * 0.6) {
+        ball.y = p.y - ball.r;
+        if (p.type === 'g') {          // 弹簧云：弹射超高，附带 1 秒无敌
+          ball.vy = -17;
+          squashT = 10;
+          invincibleT = 60;
+          sfx.spring();
+        } else {
+          ball.vy = temp.spring > 0 ? -12.2 : bounceV;
+          squashT = 6;
+          sfx.bounce();
+          if (p.type === 'b' && !p.shake) { p.shake = 14; sfx.crack(); }  // 碎云先晃后碎
+        }
+        break;
+      }
+    }
+  }
+
+  // 拾取金币（磁铁会把附近的金币吸过来）
+  for (const c of coins) {
+    if (c.taken) continue;
+    const cdx = ball.x - c.x, cdy = ball.y - c.y;
+    const cd = Math.hypot(cdx, cdy);
+    if ((equip.magnet || temp.magnet > 0) && cd < 70 && cd > 1) { c.x += cdx * 0.18; c.y += cdy * 0.18; }
+    if (cd < ball.r + 7) {
+      c.taken = true;
+      coinCount++;
+      sfx.coin();
+    }
+  }
+
+  // 拾取限时道具：磁铁/弹簧/护盾，生效 10 秒（护盾在时限内坠落救命一次）
+  for (const p of powerups) {
+    if (p.taken) continue;
+    if (Math.hypot(ball.x - p.x, ball.y - p.y) < ball.r + 11) {
+      p.taken = true;
+      temp[p.kind] = PU_TIME;
+      sfx.power();
+    }
+  }
+
+  // 相机只向上滚
+  if (ball.y - camY < H * 0.35) camY = ball.y - H * 0.35;
+
+  // 高度 & 计分
+  maxAlt = Math.max(maxAlt, GROUND_Y - ball.y);
+  meters = maxAlt / PX_PER_M;
+  if (!won && meters >= MOON_M) { won = true; wonT = 240; sfx.win(); }
+  if (wonT > 0) wonT--;
+  // 里程碑：每 500m 弹横幅庆祝（1500m 交给登月横幅）
+  if (meters >= nextMilestone) {
+    if (nextMilestone !== MOON_M) {
+      milestoneText = `${nextMilestone} m！`;
+      milestoneT = 150;
+      sfx.cheer();
+    }
+    nextMilestone += 500;
+  }
+  if (milestoneT > 0) milestoneT--;
+
+  // 716m 彩蛋：K3 发布纪念（2026.07.16），彩带烟花 + 纪念横幅
+  if (!k3Done && meters >= 716) {
+    k3Done = true;
+    k3T = 200;
+    sfx.k3();
+    const colors = ['#ffd54a', '#5b8ff5', '#f58f8f', '#93e07d', '#e0ccff'];
+    for (let i = 0; i < 60; i++) {
+      const a = Math.random() * Math.PI * 2, v = 1 + Math.random() * 2.6;
+      k3Fx.push({
+        x: W / 2 + (Math.random() - 0.5) * 160,
+        y: camY + 110 + (Math.random() - 0.5) * 60,
+        vx: Math.cos(a) * v, vy: Math.sin(a) * v - 1,
+        c: colors[i % colors.length], life: 90 + Math.random() * 60,
+      });
+    }
+  }
+  if (k3T > 0) k3T--;
+  for (const p of k3Fx) { p.x += p.vx; p.y += p.vy; p.vy += 0.03; p.life--; }
+  k3Fx = k3Fx.filter(p => p.life > 0);
+
+  ensurePlatforms();
+
+  if (squashT > 0) squashT--;
+
+  // 掉出屏幕：有护盾先救命，否则结算
+  if (ball.y - camY > H + 50) {
+    if ((equip.shield && !shieldUsed) || temp.shield > 0) {
+      if (equip.shield && !shieldUsed) shieldUsed = true;
+      else temp.shield = 0;   // 限时护盾救命后消耗掉
+      ball.y = camY + H * 0.55;
+      ball.vy = temp.spring > 0 ? -12.2 : bounceV;
+      ball.vx = 0;
+      sfx.shield();
+    } else {
+      die();
+    }
+  }
+}
+
+// ---------- 绘制 ----------
+
+function hexMix(c1, c2, t) {
+  const a = [1, 3, 5].map(i => parseInt(c1.substr(i, 2), 16));
+  const b = [1, 3, 5].map(i => parseInt(c2.substr(i, 2), 16));
+  const c = a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+
+function hexA(hex, a) {
+  const r = parseInt(hex.substr(1, 2), 16), g = parseInt(hex.substr(3, 2), 16), b = parseInt(hex.substr(5, 2), 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+const SKY = [
+  [0,    '#8ec5fc', '#e8f6ff'],
+  [600,  '#7c6bb8', '#d3a6d9'],
+  [1200, '#0b1030', '#1c2450'],
+  [2200, '#04060e', '#0a0e24'],
+];
+function skyColors(m) {
+  let i = 0;
+  while (i < SKY.length - 2 && m > SKY[i + 1][0]) i++;
+  const [m0, t0, b0] = SKY[i], [m1, t1, b1] = SKY[i + 1];
+  const t = Math.min(1, Math.max(0, (m - m0) / (m1 - m0)));
+  return [hexMix(t0, t1, t), hexMix(b0, b1, t)];
+}
+
+function drawBackground() {
+  const [top, bottom] = skyColors(meters);
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, top);
+  g.addColorStop(1, bottom);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  // 星星：500 米后逐渐显现
+  const alpha = Math.min(1, Math.max(0, (meters - 400) / 500));
+  if (alpha > 0) {
+    ctx.fillStyle = `rgba(255,255,255,${0.85 * alpha})`;
+    for (const s of stars) {
+      const y = ((s.y + camY * s.p) % H + H) % H;
+      ctx.beginPath();
+      ctx.arc(s.x, y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // 月亮（终点）
+  const moonY = GROUND_Y - MOON_M * PX_PER_M;
+  const sy = moonY - camY;
+  if (sy > -160 && sy < H + 160) {
+    // 光晕用径向渐变，不用 shadowBlur（手机性能）
+    const mg = ctx.createRadialGradient(W / 2, sy, 40, W / 2, sy, 150);
+    mg.addColorStop(0, 'rgba(255,246,200,0.55)');
+    mg.addColorStop(1, 'rgba(255,246,200,0)');
+    ctx.fillStyle = mg;
+    ctx.beginPath();
+    ctx.arc(W / 2, sy, 150, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#f7f3d8';
+    ctx.beginPath();
+    ctx.arc(W / 2, sy, 70, 0, Math.PI * 2);
+    ctx.fill();
+    // 陨石坑
+    ctx.fillStyle = 'rgba(190,185,150,0.5)';
+    for (const [cx, cy, cr] of [[-22, -14, 12], [18, 8, 9], [-6, 26, 7], [30, -26, 6]]) {
+      ctx.beginPath();
+      ctx.arc(W / 2 + cx, sy + cy, cr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+function drawCloud(p, y) {
+  const pal = {
+    n: ['#ffffff', '#dde7f5'],  // 普通云：白
+    m: ['#e8f5ff', '#a9d6f7'],  // 移动云：淡蓝
+    b: ['#f3e0c3', '#d9b08c'],  // 碎云：棕
+    d: ['#7a7f9c', '#40455f'],  // 乌云：深灰蓝（危险）
+    g: ['#e8f9cd', '#7ed68a'],  // 弹簧云：嫩绿
+  }[p.type];
+  // 淡淡的投影
+  ctx.fillStyle = 'rgba(30,50,90,0.10)';
+  ctx.beginPath();
+  ctx.ellipse(p.x + p.w / 2, y + 22, p.w / 2 - 5, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 云身：三个圆包叠成，竖直渐变，没有直角边；乌云带一圈电光晕
+  const g = ctx.createLinearGradient(0, y - 5, 0, y + 20);
+  g.addColorStop(0, pal[0]);
+  g.addColorStop(1, pal[1]);
+  if (p.type === 'd') { // 电光晕：径向渐变，不用 shadowBlur（性能）
+    const hg = ctx.createRadialGradient(p.x + p.w / 2, y + 11, 4, p.x + p.w / 2, y + 11, p.w * 0.75);
+    hg.addColorStop(0, 'rgba(90,95,140,.5)');
+    hg.addColorStop(1, 'rgba(90,95,140,0)');
+    ctx.fillStyle = hg;
+    ctx.beginPath();
+    ctx.ellipse(p.x + p.w / 2, y + 11, p.w * 0.75, 24, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(p.x + p.w * 0.25, y + 11, 9.5, 0, Math.PI * 2);
+  ctx.arc(p.x + p.w * 0.50, y + 8, 13, 0, Math.PI * 2);
+  ctx.arc(p.x + p.w * 0.75, y + 11, 9.5, 0, Math.PI * 2);
+  ctx.roundRect(p.x + p.w * 0.25 - 9.5, y + 11, p.w * 0.5 + 19, 8, 4);
+  ctx.fill();
+  if (p.type === 'b') { // 碎云的裂纹
+    ctx.strokeStyle = 'rgba(120,80,40,0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(p.x + p.w * 0.35, y + 3);
+    ctx.lineTo(p.x + p.w * 0.5, y + 16);
+    ctx.lineTo(p.x + p.w * 0.65, y + 5);
+    ctx.stroke();
+  }
+  if (p.type === 'd') { // 乌云画一道小闪电，提示危险
+    ctx.fillStyle = '#ffd54a';
+    ctx.beginPath();
+    const lx = p.x + p.w / 2, ly = y + 9;
+    ctx.moveTo(lx + 2.5, ly - 7);
+    ctx.lineTo(lx - 3, ly + 2.5);
+    ctx.lineTo(lx + 0.5, ly + 2.5);
+    ctx.lineTo(lx - 2.5, ly + 10);
+    ctx.lineTo(lx + 4.5, ly - 1);
+    ctx.lineTo(lx + 0.5, ly - 1);
+    ctx.closePath();
+    ctx.fill();
+  }
+  if (p.type === 'g') { // 弹簧云：顶上画三层白色线圈
+    ctx.strokeStyle = 'rgba(255,255,255,.95)';
+    ctx.lineWidth = 1.6;
+    const gx = p.x + p.w / 2;
+    for (const [gy, grx] of [[-1, 7], [-5, 5.5], [-9, 4]]) {
+      ctx.beginPath();
+      ctx.ellipse(gx, y + gy, grx, 2, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawPlatforms() {
+  for (const p of platforms) {
+    if (p.gone) continue;
+    const y = p.y - camY;
+    if (y < -30 || y > H + 30) continue;
+    if (p.shake > 0) {  // 碎云抖动预警
+      drawCloud({...p, x: p.x + Math.sin(frame * 2.1) * 1.6 * (p.shake / 14)}, y);
+    } else {
+      drawCloud(p, y);
+    }
+  }
+}
+
+function drawHazards() {
+  for (const h of hazards) {
+    const y = h.y - camY;
+    if (y < -30 || y > H + 30) continue;
+    drawCloud({x: h.x, w: h.w, type: 'd'}, y);
+  }
+}
+
+// 716m 彩蛋彩带：世界坐标，随镜头留在原地
+function drawK3() {
+  for (const p of k3Fx) {
+    ctx.globalAlpha = Math.min(1, p.life / 40);
+    ctx.fillStyle = p.c;
+    ctx.fillRect(p.x - 2, p.y - camY - 2, 4, 4);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawBall() {
+  const sq = squashT / 6; // 1 → 0
+  ctx.save();
+  if (invincibleT > 0) ctx.globalAlpha = 0.55 + 0.45 * Math.sin(frame * 0.4);   // 无敌时闪烁
+  ctx.translate(ball.x, ball.y - camY);
+  ctx.scale(1 + 0.25 * sq, 1 - 0.22 * sq);
+
+  // 球体：角色配色；光晕用径向渐变，不用 shadowBlur（手机性能）
+  const sk = SKINS.find(s => s.id === curSkin) || SKINS[0];
+  const gl = ctx.createRadialGradient(0, 0, ball.r * 0.5, 0, 0, ball.r * 2.2);
+  gl.addColorStop(0, hexA(sk.c[1], 0.5));
+  gl.addColorStop(1, hexA(sk.c[1], 0));
+  ctx.fillStyle = gl;
+  ctx.beginPath();
+  ctx.arc(0, 0, ball.r * 2.2, 0, Math.PI * 2);
+  ctx.fill();
+  const g = ctx.createRadialGradient(-5, -7, 3, 0, 0, ball.r + 2);
+  g.addColorStop(0, sk.c[0]);
+  g.addColorStop(0.6, sk.c[1]);
+  g.addColorStop(1, sk.c[2]);
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(0, 0, ball.r, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 两只眼睛，朝移动方向看（折镜是白球，用深色眼睛）
+  const look = Math.max(-1, Math.min(1, ball.vx / 4)) * 2.5;
+  ctx.fillStyle = sk.eye || '#fff';
+  for (const ex of [-5.5, 5.5]) {
+    ctx.beginPath();
+    ctx.roundRect(ex - 2.1 + look, -6, 4.2, 7.5, 2.1);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawHUD() {
+  ctx.fillStyle = meters > 900 ? 'rgba(255,255,255,0.92)' : 'rgba(30,40,70,0.75)';
+  ctx.font = '600 20px -apple-system, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(`${Math.floor(meters)} m`, 14, 32);
+  // 金币计数
+  drawCoin(20, 53, 1);
+  ctx.fillStyle = meters > 900 ? 'rgba(255,255,255,0.92)' : 'rgba(30,40,70,0.75)';
+  ctx.font = '600 15px -apple-system, sans-serif';
+  ctx.fillText(String(coinCount), 33, 58);
+  // 生效中的限时道具：图标 + 倒计时进度条
+  let hy = 86;
+  for (const k of ['magnet', 'spring', 'shield']) {
+    if (temp[k] > 0) {
+      const st = PU_STYLE[k];
+      ctx.fillStyle = st.c[1];
+      ctx.beginPath(); ctx.arc(18, hy, 8, 0, Math.PI * 2); ctx.fill();
+      drawPowerupIcon(k, 18, hy, 0.62, st.c[1]);
+      // 进度条：随剩余时间缩短
+      const bw = 58 * (temp[k] / PU_TIME);
+      ctx.fillStyle = meters > 900 ? 'rgba(255,255,255,0.25)' : 'rgba(30,40,70,0.18)';
+      ctx.beginPath(); ctx.roundRect(32, hy - 3, 58, 6, 3); ctx.fill();
+      if (bw > 0.5) {
+        ctx.fillStyle = st.c[1];
+        ctx.beginPath(); ctx.roundRect(32, hy - 3, bw, 6, Math.min(3, bw / 2)); ctx.fill();
+      }
+      hy += 22;
+    }
+  }
+  ctx.font = '12px -apple-system, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText(`最高 ${bestMeters} m`, W - 14, 30);
+
+  if (wonT > 0) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, wonT / 40);
+    ctx.fillStyle = '#fff7c9';
+    ctx.font = '600 24px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('到达月球！', W / 2, 110);
+    ctx.font = '14px -apple-system, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillText('继续向上，看看还能飞多高', W / 2, 136);
+    ctx.restore();
+  }
+
+  // 里程碑横幅：弹出后停留渐隐
+  if (milestoneT > 0) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, milestoneT / 30);
+    const pop = 1 + 0.18 * Math.max(0, milestoneT - 130) / 20;
+    ctx.fillStyle = '#ffe9a8';
+    ctx.font = `700 ${Math.round(26 * pop)}px -apple-system, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(milestoneText, W / 2, 170);
+    ctx.restore();
+  }
+
+  // 716m K3 彩蛋横幅
+  if (k3T > 0) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, k3T / 40);
+    ctx.fillStyle = '#ffd54a';
+    ctx.font = '700 24px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('K3 发布纪念 🎉', W / 2, 120);
+    ctx.font = '13px -apple-system, sans-serif';
+    ctx.fillStyle = 'rgba(255,233,168,.9)';
+    ctx.fillText('2026.07.16', W / 2, 142);
+    ctx.restore();
+  }
+
+  // 乌云预警：触发后三角一直闪到乌云进场
+  for (const h of hazards) {
+    const hsy = h.y - camY;
+    if (!h.warned || hsy >= 0) continue;
+    const ax = Math.max(20, Math.min(W - 20, h.x + h.w / 2));
+    const pulse = 0.55 + 0.45 * Math.sin(frame * 0.25);
+    ctx.fillStyle = `rgba(255,90,90,${pulse})`;
+    ctx.beginPath();
+    ctx.moveTo(ax, 58);
+    ctx.lineTo(ax - 8, 46);
+    ctx.lineTo(ax + 8, 46);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+// 金币预渲染成贴图：渐变 + 光晕只画一次，之后每帧 drawImage（shadowBlur 逐帧太贵）
+const COIN_S = 4;   // 贴图超采样倍数
+const coinSprite = document.createElement('canvas');
+coinSprite.width = coinSprite.height = (7 * 2 + 8) * COIN_S;   // 币身 + 光晕边距
+(function renderCoinSprite() {
+  const c = coinSprite.getContext('2d');
+  const r = 7 * COIN_S, cx = coinSprite.width / 2, cy = coinSprite.height / 2;
+  // 光晕
+  let g = c.createRadialGradient(cx, cy, r * 0.4, cx, cy, r + 3.5 * COIN_S);
+  g.addColorStop(0, 'rgba(255,213,74,0.5)');
+  g.addColorStop(1, 'rgba(255,213,74,0)');
+  c.fillStyle = g;
+  c.fillRect(0, 0, coinSprite.width, coinSprite.height);
+  // 币身：径向渐变，左上受光
+  g = c.createRadialGradient(cx - 2.5 * COIN_S, cy - 3 * COIN_S, COIN_S, cx, cy, r);
+  g.addColorStop(0, '#fff6c4');
+  g.addColorStop(0.55, '#ffd54a');
+  g.addColorStop(1, '#cf9a1a');
+  c.fillStyle = g;
+  c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill();
+  // 内圈压边
+  c.strokeStyle = 'rgba(150,102,10,0.8)';
+  c.lineWidth = 1.1 * COIN_S;
+  c.beginPath(); c.arc(cx, cy, 4.9 * COIN_S, 0, Math.PI * 2); c.stroke();
+  // 五角星
+  c.fillStyle = '#c9962a';
+  c.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const rr = (i % 2 ? 1.4 : 3.1) * COIN_S;
+    const a = -Math.PI / 2 + i * Math.PI / 5;
+    if (i === 0) c.moveTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+    else c.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+  }
+  c.closePath(); c.fill();
+})();
+
+const COIN_SIZE = coinSprite.width / COIN_S;   // 逻辑尺寸
+
+// 单枚金币：贴预渲染的 sprite，spin 控制旋转压扁
+function drawCoin(x, y, spin) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(Math.max(0.18, spin), 1);
+  ctx.drawImage(coinSprite, -COIN_SIZE / 2, -COIN_SIZE / 2, COIN_SIZE, COIN_SIZE);
+  ctx.restore();
+}
+
+const PU_TIME = 600;   // 限时道具生效时长（帧，60=1秒）
+const PU_STYLE = {
+  magnet: {c: ['#ffc9c9', '#e05757']},
+  spring: {c: ['#d8f7b0', '#4fbd55']},
+  shield: {c: ['#b3e3ff', '#3f9fd8']},
+};
+
+// 道具图标：白色剪影画在彩球上，s 为缩放
+function drawPowerupIcon(kind, x, y, s, tipColor) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(s, s);
+  ctx.strokeStyle = ctx.fillStyle = '#fff';
+  if (kind === 'magnet') {
+    // 马蹄形磁铁
+    ctx.lineWidth = 4.2;
+    ctx.beginPath();
+    ctx.moveTo(-4.2, -5.5);
+    ctx.lineTo(-4.2, 0);
+    ctx.arc(0, 0, 4.2, Math.PI, 0, true);
+    ctx.lineTo(4.2, -5.5);
+    ctx.stroke();
+    // 两个磁极头：用球底色压出双色磁铁的错觉
+    ctx.fillStyle = tipColor;
+    ctx.fillRect(-6.3, -8.2, 4.2, 3);
+    ctx.fillRect(2.1, -8.2, 4.2, 3);
+  } else if (kind === 'spring') {
+    // 螺旋弹簧：四层线圈
+    ctx.lineWidth = 1.8;
+    for (const yy of [-6, -2, 2, 6]) {
+      ctx.beginPath();
+      ctx.ellipse(0, yy, 5, 2.4, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  } else {
+    // 盾牌
+    ctx.beginPath();
+    ctx.moveTo(0, -8);
+    ctx.quadraticCurveTo(4.5, -7, 6.5, -5);
+    ctx.quadraticCurveTo(6.5, 2.5, 0, 8);
+    ctx.quadraticCurveTo(-6.5, 2.5, -6.5, -5);
+    ctx.quadraticCurveTo(-4.5, -7, 0, -8);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// 限时道具：彩色渐变球 + 图标，轻轻上下浮动
+function drawPowerups() {
+  for (const p of powerups) {
+    if (p.taken) continue;
+    const y = p.y - camY;
+    if (y < -24 || y > H + 24) continue;
+    const bob = Math.sin(frame * 0.05 + p.ph) * 3;
+    const st = PU_STYLE[p.kind];
+    const g = ctx.createRadialGradient(p.x - 3, y + bob - 4, 2, p.x, y + bob, 12);
+    g.addColorStop(0, st.c[0]);
+    g.addColorStop(1, st.c[1]);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(p.x, y + bob, 11, 0, Math.PI * 2);
+    ctx.fill();
+    drawPowerupIcon(p.kind, p.x, y + bob, 1, st.c[1]);
+  }
+}
+
+function drawCoins() {
+  for (const c of coins) {
+    if (c.taken) continue;
+    const y = c.y - camY;
+    if (y < -20 || y > H + 20) continue;
+    const spin = Math.abs(Math.cos(frame * 0.09 + c.ph));   // 旋转：宽度周期性压扁
+    const bob = Math.sin(frame * 0.05 + c.ph) * 2.5;        // 轻轻上下浮动
+    drawCoin(c.x, y + bob, spin);
+  }
+}
+
+function draw() {
+  drawBackground();
+  drawPlatforms();
+  drawHazards();
+  drawCoins();
+  drawPowerups();
+  drawBall();
+  drawK3();
+  drawHUD();
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ---------- 输入 ----------
+
+document.addEventListener('keydown', e => {
+  ensureAudio();
+  const k = e.key.toLowerCase();
+  if (k === 'arrowleft' || k === 'a') keys.left = true;
+  else if (k === 'arrowright' || k === 'd') keys.right = true;
+  else if (k === 'm') toggleMute();
+  else if (k === ' ') {
+    e.preventDefault();
+    if (screen === 'home' || (screen === 'game' && dead)) startGame();
+  }
+});
+document.addEventListener('keyup', e => {
+  const k = e.key.toLowerCase();
+  if (k === 'arrowleft' || k === 'a') keys.left = false;
+  else if (k === 'arrowright' || k === 'd') keys.right = false;
+});
+
+function touchPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  return (e.touches[0].clientX - rect.left) / rect.width * W;
+}
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  ensureAudio();
+  touchDir = touchPos(e) < W / 2 ? -1 : 1;
+}, {passive: false});
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (!dead) touchDir = touchPos(e) < W / 2 ? -1 : 1;
+}, {passive: false});
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  if (e.touches.length === 0) touchDir = 0;
+}, {passive: false});
+document.getElementById('mutebtn').textContent = muted ? '🔇' : '🔊';
+document.getElementById('mutebtn').addEventListener('click', () => { ensureAudio(); toggleMute(); });
+
+// ---------- 界面流程 ----------
+const panels = {
+  home: document.getElementById('home'),
+  shop: document.getElementById('shop'),
+  death: document.getElementById('death'),
+};
+
+function showPanel(name) {
+  for (const k in panels) panels[k].hidden = (k !== name);
+  if (name === 'home') {
+    document.getElementById('homeBank').textContent = bank;
+    document.getElementById('homeBest').textContent = bestMeters;
+  }
+}
+
+function startGame() {
+  ensureAudio();
+  bounceV = equip.spring ? -12.2 : -11.2;
+  showPanel(null);
+  screen = 'game';
+  reset();
+}
+
+function die(reason) {
+  dead = true;
+  sfx.fall();
+  bank += coinCount;
+  const m = Math.floor(meters);
+  if (m > bestMeters) bestMeters = m;
+  localStorage.setItem('jtm_best', bestMeters);
+  saveMeta();
+  document.getElementById('deathTitle').textContent = reason || '坠落啦';
+  document.getElementById('deathStats').textContent =
+    `本次 ${m} m · 金币 +${coinCount} · 存款 ${bank}`;
+  showPanel('death');
+}
+
+// ---------- 商店 ----------
+function renderShop() {
+  document.getElementById('shopBank').textContent = bank;
+  const list = document.getElementById('shopList');
+  list.innerHTML = '';
+
+  const cat1 = document.createElement('div');
+  cat1.className = 'shop-cat';
+  cat1.textContent = '小球角色';
+  list.appendChild(cat1);
+  for (const s of SKINS) {
+    const owned = ownedSkins.includes(s.id);
+    const row = document.createElement('div');
+    row.className = 'shop-row';
+    row.innerHTML = `<span class="mini-ball" style="background:radial-gradient(circle at 35% 30%, ${s.c[0]}, ${s.c[1]} 60%, ${s.c[2]})"></span><span class="shop-name">${s.name}</span>`;
+    const b = document.createElement('button');
+    b.className = 'shop-btn';
+    if (curSkin === s.id) {
+      b.textContent = '使用中'; b.disabled = true;
+    } else if (owned) {
+      b.textContent = '使用';
+      b.onclick = () => { curSkin = s.id; saveMeta(); renderShop(); };
+    } else {
+      b.textContent = `${s.price} 金币`;
+      b.disabled = bank < s.price;
+      b.onclick = () => {
+        if (bank < s.price) return;
+        bank -= s.price;
+        ownedSkins.push(s.id);
+        curSkin = s.id;
+        saveMeta(); renderShop(); sfx.coin();
+      };
+    }
+    row.appendChild(b);
+    list.appendChild(row);
+  }
+
+  const cat2 = document.createElement('div');
+  cat2.className = 'shop-cat';
+  cat2.textContent = '道具（永久拥有，可装备/卸下）';
+  list.appendChild(cat2);
+  for (const it of ITEMS) {
+    const owned = !!ownedItems[it.id];
+    const row = document.createElement('div');
+    row.className = 'shop-row';
+    row.innerHTML = `<span class="shop-name">${it.name}<small>${it.desc}</small></span>`;
+    const b = document.createElement('button');
+    b.className = 'shop-btn';
+    if (owned && equip[it.id]) {
+      b.textContent = '卸下';
+      b.onclick = () => { equip[it.id] = false; saveMeta(); renderShop(); };
+    } else if (owned) {
+      b.textContent = '装备';
+      b.onclick = () => { equip[it.id] = true; saveMeta(); renderShop(); };
+    } else {
+      b.textContent = `${it.price} 金币`;
+      b.disabled = bank < it.price;
+      b.onclick = () => {
+        if (bank < it.price) return;
+        bank -= it.price;
+        ownedItems[it.id] = true;
+        equip[it.id] = true;
+        saveMeta(); renderShop(); sfx.coin();
+      };
+    }
+    row.appendChild(b);
+    list.appendChild(row);
+  }
+}
+
+document.getElementById('btnStart').onclick = startGame;
+document.getElementById('btnShop').onclick = () => { ensureAudio(); screen = 'shop'; renderShop(); showPanel('shop'); };
+document.getElementById('btnBack').onclick = () => { screen = 'home'; showPanel('home'); };
+document.getElementById('btnRetry').onclick = startGame;
+document.getElementById('btnDeathShop').onclick = () => { screen = 'shop'; renderShop(); showPanel('shop'); };
+document.getElementById('btnHome').onclick = () => { screen = 'home'; reset(); showPanel('home'); };
+
+reset();
+showPanel('home');
+loop();
+</script>
+</body>
+</html>
