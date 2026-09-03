@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0b1030">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>Jump to the Moon</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -1864,6 +1867,12 @@ document.getElementById('btnShareBack').onclick = () => showPanel('death');
 reset();
 showPanel('home');
 loop();
+</script>
+<script>
+// PWA：注册离线缓存（仅 HTTPS 下生效，门牌 http 渠道自动跳过）
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js');
+}
 </script>
 </body>
 </html>
