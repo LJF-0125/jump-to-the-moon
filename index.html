@@ -163,10 +163,11 @@ const W = 420, H = 640;
 const PX_PER_M = 8;          // 8 像素 = 1 米
 const MOON_M = 1500;         // 月球高度
 const GROUND_Y = H - 60;
+const ZHUI_FALL_G = 0.20;   // 坠明「缓刑」：下坠段重力（正常 0.35），上升段不动
 const HAZ_WARN = 260;   // 乌云预警距离（px，约 33 米；触发后三角常亮到进场）
 // 风带：按距离固定分布，300m 起每 300m 一片、100m 厚（1500m 前共 4 片），方向每局随机
 const WIND_START_M = 300, WIND_EVERY_M = 300, WIND_THICK_M = 100;
-const WIND_V = [1.6, 2.4, 3.2];   // 微风/大风/狂风（px/帧，按第几片风带递增，第 3 片起封顶）
+const WIND_V = [1.6, 2.4, 2.7];   // 微风/大风/狂风（px/帧，按第几片风带递增，第 3 片起封顶）
 const WIND_WARN_M = 45;   // 风带预警距离（米）：进带前这么远就弹横幅+箭头+风声渐起
 
 const canvas = document.getElementById('game');
@@ -210,6 +211,10 @@ let windBandT = 0, windBandText = '', lastBand = -1;   // 风带进场横幅
 let lastApproach = -1;   // 风带预警去重（每片只预警一次）
 let tutStep = 0, tutCount = 0;                    // 教学：0 学移动 / 1 学跳云 / 2 图鉴
 let startX = 0, tutMinX = 0, tutMaxX = 0;         // 教学第 1 步的左右移动检测
+let taxUsed = false;         // 断魄「死与税」：每局限一次
+let shieldCharges = 0;       // 通碧「等价交换」换来的无时限护盾次数
+let combo = 0;               // 折镜「利滚利」踩云计数
+let skillT = 0, skillText = '';   // 技能触发横幅
 
 // ---------- 存档 / 商店 ----------
 let screen = 'home';     // home | shop | game
@@ -224,11 +229,11 @@ let equip = JSON.parse(localStorage.getItem('jtm_equip') || '{}');
 let ach = JSON.parse(localStorage.getItem('jtm_ach') || '{}');
 
 const SKINS = [
-  {id: 'yingyan', name: '荧焰', price: 0,   c: ['#9ec2ff', '#5b8ff5', '#2f6bf0']},
-  {id: 'duanpo',  name: '断魄', price: 30,  c: ['#ffc9c9', '#f58f8f', '#e05757']},
-  {id: 'zhejing', name: '折镜', price: 50,  c: ['#ffffff', '#e2e8f5', '#aeb9d4'], eye: '#3a4460'},
-  {id: 'tongbi',  name: '通碧', price: 80,  c: ['#d8f7b0', '#93e07d', '#4fbd55']},
-  {id: 'zhui',    name: '坠明', price: 150, c: ['#e0ccff', '#b08ff5', '#835bf0']},
+  {id: 'yingyan', name: '荧焰', price: 0,   c: ['#9ec2ff', '#5b8ff5', '#2f6bf0'], skill: '平凡及喜乐', sd: '没有技能，但平安快乐'},
+  {id: 'zhejing', name: '折镜', price: 30,  c: ['#ffffff', '#e2e8f5', '#aeb9d4'], eye: '#3a4460', skill: '利滚利', sd: '每踩满 10 朵云，+1 金币'},
+  {id: 'duanpo',  name: '断魄', price: 50,  c: ['#ffc9c9', '#f58f8f', '#e05757'], skill: '死与税', sd: '死亡时清空本局金币换复活（每局一次，护盾优先；0 金币不复活）'},
+  {id: 'zhui',    name: '坠明', price: 80,  c: ['#e0ccff', '#b08ff5', '#835bf0'], skill: '缓刑', sd: '下坠变慢更飘，多点时间调整落点'},
+  {id: 'tongbi',  name: '通碧', price: 150, c: ['#d8f7b0', '#93e07d', '#4fbd55'], skill: '等价交换', sd: '开局压到 1 心，每颗心换 1 次无时限护盾（红心可捡回）'},
 ];
 
 // 旧版皮肤 id 迁移到角色 id
@@ -550,7 +555,15 @@ function reset() {
   k3Fx = []; k3T = 0; k3Done = false;
   invincibleT = 0;
   shieldUsed = false;
-  hp = maxHp = 2 + (equip.heart ? 1 : 0);   // 装备生命之心后每局 3 颗心
+  maxHp = 2 + (equip.heart ? 1 : 0);   // 装备生命之心后每局 3 颗心
+  shieldCharges = 0;
+  if (curSkin === 'tongbi') {   // 等价交换：开局压到 1 心，扣几颗换几次无时限盾（红心可捡回）
+    shieldCharges = maxHp - 1;
+    hp = 1;
+  } else {
+    hp = maxHp;
+  }
+  taxUsed = false; combo = 0; skillT = 0; skillText = '';
   achT = 0; achQueue = []; achText = '';
   zapped = false; shieldSaved = false;
   windDirs = []; windDrift = 0; windBandT = 0; lastBand = -1; lastApproach = -1;   // 风带方向每局重roll
@@ -609,7 +622,7 @@ function updateTutorial() {
   if (!left && !right) ball.vx *= 0.86;
   ball.vx = Math.max(-5.2, Math.min(5.2, ball.vx));
   const prevBottom = ball.y + ball.r;
-  ball.vy += 0.35;
+  ball.vy += (curSkin === 'zhui' && ball.vy > 0) ? ZHUI_FALL_G : 0.35;   // 缓刑在教学局同样生效
   ball.x += ball.vx;
   ball.y += ball.vy;
   if (ball.x < -ball.r) ball.x = W + ball.r;
@@ -794,7 +807,7 @@ function update() {
   ball.vx = Math.max(-5.2, Math.min(5.2, ball.vx));
 
   const prevBottom = ball.y + ball.r;
-  ball.vy += 0.35;
+  ball.vy += (curSkin === 'zhui' && ball.vy > 0) ? ZHUI_FALL_G : 0.35;   // 缓刑：下坠变慢
   ball.x += ball.vx;
   // 持续风：空中随风漂移（独立位移项，不动 5.2/0.65 手感）；出风带后平滑归零
   const wNow = windAt(meters);
@@ -880,6 +893,10 @@ function update() {
           sfx.bounce();
           if (p.type === 'b' && !p.shake) { p.shake = 14; sfx.crack(); }  // 碎云先晃后碎
         }
+        if (curSkin === 'zhejing') {   // 利滚利：每踩满 10 朵云 +1 金币
+          combo++;
+          if (combo % 10 === 0) { coinCount++; skillToast('利滚利 +1 金币'); sfx.coin(); }
+        }
         break;
       }
     }
@@ -934,6 +951,7 @@ function update() {
   // 成就横幅：队列逐个播
   if (achT > 0) achT--;
   else if (achQueue.length) { achText = achQueue.shift(); achT = 150; }
+  if (skillT > 0) skillT--;
 
   // 716m 彩蛋：K3 发布纪念（2026.07.16），彩带烟花 + 纪念横幅
   if (!k3Done && meters >= 716) {
@@ -960,11 +978,13 @@ function update() {
 
   if (squashT > 0) squashT--;
 
-  // 掉出屏幕：有护盾先救命，否则结算
+  // 掉出屏幕：限时盾（不用就过期）→ 等价交换盾 → 月光护盾，都没有就结算
+  // （红球「死与税」在 die() 里兜底——盾确实用完了才会收税）
   if (ball.y - camY > H + 50) {
-    if ((equip.shield && !shieldUsed) || temp.shield > 0) {
-      if (equip.shield && !shieldUsed) shieldUsed = true;
-      else temp.shield = 0;   // 限时护盾救命后消耗掉
+    if (temp.shield > 0 || shieldCharges > 0 || (equip.shield && !shieldUsed)) {
+      if (temp.shield > 0) temp.shield = 0;
+      else if (shieldCharges > 0) shieldCharges--;
+      else shieldUsed = true;
       shieldSaved = true;   // 成就：护盾救命
       ball.y = camY + H * 0.55;
       ball.vy = temp.spring > 0 ? -12.2 : bounceV;
@@ -1210,6 +1230,16 @@ function drawHUD() {
   ctx.fillText(`${Math.floor(meters)} m`, 14, 32);
   // 血量：高度旁边一排心，实心=剩余，空心=已损失
   for (let i = 0; i < maxHp; i++) drawHeart(114 + i * 24, 25, i < hp);
+  // 等价交换的无时限盾：小蓝盾 + 剩余次数
+  if (shieldCharges > 0) {
+    const sx = 122 + maxHp * 24;
+    ctx.fillStyle = '#3f9fd8';
+    ctx.beginPath(); ctx.arc(sx, 25, 8, 0, Math.PI * 2); ctx.fill();
+    drawPowerupIcon('shield', sx, 25, 0.62, '#3f9fd8');
+    ctx.fillStyle = meters > 900 ? 'rgba(255,255,255,0.92)' : 'rgba(30,40,70,0.75)';
+    ctx.font = '600 13px -apple-system, sans-serif';
+    ctx.fillText(`×${shieldCharges}`, sx + 11, 29);
+  }
   // 金币计数
   drawCoin(20, 53, 1);
   ctx.fillStyle = meters > 900 ? 'rgba(255,255,255,0.92)' : 'rgba(30,40,70,0.75)';
@@ -1303,6 +1333,17 @@ function drawHUD() {
     ctx.font = '600 17px -apple-system, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(windBandText, W / 2, 240);
+    ctx.restore();
+  }
+
+  // 技能触发横幅
+  if (skillT > 0) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, skillT / 30);
+    ctx.fillStyle = '#9ec2ff';
+    ctx.font = '600 16px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(skillText, W / 2, 275);
     ctx.restore();
   }
 
@@ -1703,7 +1744,21 @@ function startGame() {
   reset();
 }
 
+function skillToast(t) { skillText = t; skillT = 100; }   // 技能触发横幅（HUD y275）
+
 function die(reason, byThunder) {
+  // 死与税：红球专属——清空本局金币换复活（每局一次；护盾优先，能走到这说明盾用完了）
+  if (curSkin === 'duanpo' && !taxUsed && coinCount > 0) {
+    taxUsed = true;
+    skillToast(`死与税：-${coinCount} 金币，复活`);
+    coinCount = 0;
+    ball.y = camY + H * 0.55;
+    ball.vy = bounceV;
+    ball.vx = 0;
+    invincibleT = 90;   // 复活短暂无敌，防落地连死
+    sfx.power();
+    return;
+  }
   dead = true;
   sfx.fall();
   bank += coinCount;
@@ -1732,7 +1787,7 @@ function renderShop() {
     const owned = ownedSkins.includes(s.id);
     const row = document.createElement('div');
     row.className = 'shop-row';
-    row.innerHTML = `<span class="mini-ball" style="background:radial-gradient(circle at 35% 30%, ${s.c[0]}, ${s.c[1]} 60%, ${s.c[2]})"></span><span class="shop-name">${s.name}</span>`;
+    row.innerHTML = `<span class="mini-ball" style="background:radial-gradient(circle at 35% 30%, ${s.c[0]}, ${s.c[1]} 60%, ${s.c[2]})"></span><span class="shop-name">${s.name} · ${s.skill}<small>${s.sd}</small></span>`;
     const b = document.createElement('button');
     b.className = 'shop-btn';
     if (curSkin === s.id) {
