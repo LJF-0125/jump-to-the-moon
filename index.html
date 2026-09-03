@@ -224,12 +224,22 @@ let screen = 'home';     // home | shop | game
 let bounceV = -11.2;     // 弹簧鞋会调高
 let shieldUsed = false;
 
-let bank = +(localStorage.getItem('jtm_bank') || 0);
-let ownedSkins = JSON.parse(localStorage.getItem('jtm_skins') || '["yingyan"]');
+// 存档读取统一走 loadJSON：数据损坏时兜底回默认值，别让游戏白屏打不开
+function loadJSON(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return fallback;
+    return JSON.parse(raw);
+  } catch (e) { return fallback; }
+}
+
+let bank = +(localStorage.getItem('jtm_bank')) || 0;   // 脏数据 → NaN → 0
+let ownedSkins = loadJSON('jtm_skins', ['yingyan']);
+if (!Array.isArray(ownedSkins)) ownedSkins = ['yingyan'];
 let curSkin = localStorage.getItem('jtm_skin') || 'yingyan';
-let ownedItems = JSON.parse(localStorage.getItem('jtm_items') || '{}');
-let equip = JSON.parse(localStorage.getItem('jtm_equip') || '{}');
-let ach = JSON.parse(localStorage.getItem('jtm_ach') || '{}');
+let ownedItems = loadJSON('jtm_items', {});
+let equip = loadJSON('jtm_equip', {});
+let ach = loadJSON('jtm_ach', {});
 
 const SKINS = [
   {id: 'yingyan', name: '荧焰', price: 0,   c: ['#9ec2ff', '#5b8ff5', '#2f6bf0'], skill: '平凡及喜乐', sd: '没有技能，但平安快乐'},
@@ -253,13 +263,16 @@ const ITEMS = [
   {id: 'shield', name: '月光护盾', price: 150, desc: '每局一次，坠落时自动弹回'},
 ];
 
+// 写入统一走 saveLS：隐私模式等写失败时静默跳过，不炸游戏
+function saveLS(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
 function saveMeta() {
-  localStorage.setItem('jtm_bank', bank);
-  localStorage.setItem('jtm_skins', JSON.stringify(ownedSkins));
-  localStorage.setItem('jtm_skin', curSkin);
-  localStorage.setItem('jtm_items', JSON.stringify(ownedItems));
-  localStorage.setItem('jtm_equip', JSON.stringify(equip));
-  localStorage.setItem('jtm_ach', JSON.stringify(ach));
+  saveLS('jtm_bank', bank);
+  saveLS('jtm_skins', JSON.stringify(ownedSkins));
+  saveLS('jtm_skin', curSkin);
+  saveLS('jtm_items', JSON.stringify(ownedItems));
+  saveLS('jtm_equip', JSON.stringify(equip));
+  saveLS('jtm_ach', JSON.stringify(ach));
 }
 
 bestMeters = +(localStorage.getItem('jtm_best') || 0);
@@ -528,7 +541,7 @@ function pluck(f, t) {
 
 function toggleMute() {
   muted = !muted;
-  localStorage.setItem('jtm_mute', muted ? '1' : '0');
+  saveLS('jtm_mute', muted ? '1' : '0');
   if (masterGain) masterGain.gain.value = muted ? 0 : 1;
   document.getElementById('mutebtn').textContent = muted ? '🔇' : '🔊';
 }
@@ -573,6 +586,7 @@ function reset() {
   setWindAudio(0);
   nextPlatY = GROUND_Y - 85;
   ensurePlatforms();
+  snapView();
 }
 
 // ---------- 新手教学 ----------
@@ -593,6 +607,7 @@ function startTutorial() {
   windDrift = 0; lastBand = -1; lastApproach = -1; setWindAudio(0);
   startX = W / 2; tutMinX = W / 2; tutMaxX = W / 2;
   document.getElementById('skipTut').hidden = false;
+  snapView();
 }
 
 // 第 2 步的云阵：5 朵宽云小幅度之字向上（间距按可达性公式留足余量）
@@ -604,7 +619,7 @@ function setupTutJump() {
 }
 
 function finishTutorial() {
-  localStorage.setItem('jtm_tut', '1');
+  saveLS('jtm_tut', '1');
   document.getElementById('skipTut').hidden = true;
   startGame();
 }
@@ -617,6 +632,7 @@ function startPressed() {
 
 // 教学局主循环：只保留移动/弹跳物理，无乌云无风无金币，掉了弹回（死不了）
 function updateTutorial() {
+  prevCamY = camY; prevBallX = ball.x; prevBallY = ball.y;   // 渲染插值：本步起点快照
   frame++;
   const left = keys.left || touchDir < 0;
   const right = keys.right || touchDir > 0;
@@ -797,6 +813,7 @@ function ensurePlatforms() {
 function update() {
   if (screen === 'tutorial') { updateTutorial(); return; }
   if (screen !== 'game' || dead) return;
+  prevCamY = camY; prevBallX = ball.x; prevBallY = ball.y;   // 渲染插值：本步起点快照
   frame++;
   for (const k in temp) if (temp[k] > 0) temp[k]--;   // 限时道具倒计时
   if (invincibleT > 0) invincibleT--;
@@ -1661,6 +1678,9 @@ function drawTutGallery() {
 }
 
 function draw() {
+  // 插值绘制：draw 期间临时把 camY/ball 换成视觉值，画完恢复逻辑值（各 draw* 函数无感知）
+  const logicCamY = camY, logicX = ball.x, logicY = ball.y;
+  camY = vcamY; ball.x = viewX; ball.y = viewY;
   drawBackground();
   drawWind();
   drawPlatforms();
@@ -1670,12 +1690,66 @@ function draw() {
   drawBall();
   drawK3();
   if (screen === 'tutorial') drawTutorial(); else drawHUD();
+  camY = logicCamY; ball.x = logicX; ball.y = logicY;
 }
 
-function loop() {
-  update();
-  draw();
+// 固定步长主循环：逻辑恒按 60fps 步进（STEP 累加器），90/120Hz 高刷屏不再按比例加速；
+// 绘制仍跟随 rAF。面板（首页/商店/结算等）盖住画布时跳过 draw——canvas 自带最后一帧，省电降温
+const STEP = 1000 / 60;
+let lastT, acc = 0;
+// 渲染插值状态：prev* = 上一逻辑步的位置（每步开头在 update 里快照），view* = 当前应显示的位置
+let prevCamY = 0, prevBallX = 0, prevBallY = 0, vcamY = 0, viewX = 0, viewY = 0;
+function snapView() { prevCamY = vcamY = camY; prevBallX = viewX = ball.x; prevBallY = viewY = ball.y; }
+function loop(t) {
   requestAnimationFrame(loop);
+  if (lastT === undefined) lastT = t;
+  const dt = Math.min(t - lastT, 100);   // 切后台回来最多追 100ms，防一次性补帧跳变
+  lastT = t;
+  acc += dt;
+  // 舍入式取步：iOS 的 rAF 时间戳只有 1ms 精度，60Hz 下 dt 按 17/16/17 循环，while(acc>=STEP)
+  // 的阈值恰好卡在步长上 → 形成 1/2/0 步极限环（实测柱图 120120…），平滑估计也救不了
+  // （EMA 输出仍围绕步长摆动）。改为舍入：判定带宽 ±10ms，量化抖动（±0.33ms）永远跨不过；
+  // 残差留在 acc 里长期速率依旧精确；120Hz 自动成 0/1 均匀交替，真掉帧自动 1/2 补步
+  const steps = Math.floor(acc / STEP + 0.4);
+  acc -= steps * STEP;
+  for (let i = 0; i < steps; i++) update();
+  // 渲染插值：屏幕帧间隔（iOS 上 16/17ms 抖动）和逻辑步长 16.667ms 对不齐，不插值的话
+  // 有的帧一次前进 2 步、有的帧原地不动 → 肉眼顿挫。alpha = 距下一逻辑步的时间比例，
+  // 画面位置在 上一步 → 当前步 之间平滑过渡，帧率抖动被抹平
+  const alpha = Math.max(0, Math.min(1, acc / STEP));   // 舍入取步后 acc 可能为小负值，钳回 [0,1]
+  const snapX = Math.abs(ball.x - prevBallX) > W / 2;   // 穿屏环绕瞬移，不插值
+  const snapY = Math.abs(ball.y - prevBallY) > 100;     // 护盾救命/复活/教学弹回瞬移，不插值
+  vcamY = prevCamY + (camY - prevCamY) * alpha;
+  viewX = snapX ? ball.x : prevBallX + (ball.x - prevBallX) * alpha;
+  viewY = snapY ? ball.y : prevBallY + (ball.y - prevBallY) * alpha;
+  if ((screen === 'game' && !dead) || screen === 'tutorial') draw();
+  if (DEBUG) drawDebug(t, dt, steps);
+}
+
+// 帧率诊断条：URL 加 ?debug=1 开启（调查卡顿用）。底部黑条：文字 = 屏幕 fps · 本帧逻辑
+// 步数 · 帧间隔 ms；小柱 = 最近 90 帧每帧步数（灰=0 绿=1 黄=2 红=3+），柱子颜色不均 = 节奏顿挫
+const DEBUG = /[?&]debug/.test(location.search);
+let dbgSecT = 0, dbgFrames = 0, dbgFps = 0;
+const dbgSteps = [];
+function drawDebug(t, dt, steps) {
+  dbgSteps.push(steps);
+  if (dbgSteps.length > 90) dbgSteps.shift();
+  dbgFrames++;
+  if (t - dbgSecT >= 1000) { dbgFps = dbgFrames; dbgFrames = 0; dbgSecT = t; }
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,.55)';
+  ctx.fillRect(0, H - 44, W, 44);
+  ctx.fillStyle = '#9fe8a9';
+  ctx.font = '11px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText(`v0904c · 屏幕 ${dbgFps}fps · 步数 ${steps} · 间隔 ${dt.toFixed(1)}ms`, 6, H - 28);
+  const BAR_C = ['#7a7f9c', '#4fbd55', '#ffd54a', '#e05757'];
+  for (let i = 0; i < dbgSteps.length; i++) {
+    const s = dbgSteps[i];
+    ctx.fillStyle = BAR_C[Math.min(s, 3)];
+    ctx.fillRect(6 + i * 4.5, H - 6 - s * 5, 3.5, 2 + s * 5);
+  }
+  ctx.restore();
 }
 
 // ---------- 输入 ----------
@@ -1700,27 +1774,40 @@ document.addEventListener('keyup', e => {
 
 function touchPos(e) {
   const rect = canvas.getBoundingClientRect();
-  return (e.touches[0].clientX - rect.left) / rect.width * W;
+  const t = e.touches[e.touches.length - 1];   // 认最新按下的手指：双拇指交替时方向不抽风
+  return (t.clientX - rect.left) / rect.width * W;
 }
-canvas.addEventListener('touchstart', e => {
-  e.preventDefault();
+
+// 游戏/教学进行中才接管触控（面板和按钮上的触摸不拦，走正常点击）
+function touchActive() {
+  return (screen === 'game' && !dead) || screen === 'tutorial';
+}
+
+// 触控挂在 document：游戏时全屏（含 canvas 上下留白）都能控制方向
+document.addEventListener('touchstart', e => {
+  if (e.target.closest('button, a')) return;
   ensureAudio();
-  if (screen === 'tutorial' && tutStep === 2) { finishTutorial(); return; }
+  if (screen === 'tutorial' && tutStep === 2) { e.preventDefault(); finishTutorial(); return; }
+  if (!touchActive()) return;
+  e.preventDefault();
   touchDir = touchPos(e) < W / 2 ? -1 : 1;
 }, {passive: false});
 canvas.addEventListener('click', () => {   // 桌面端图鉴页点鼠标也出发
   if (screen === 'tutorial' && tutStep === 2) finishTutorial();
 });
-canvas.addEventListener('touchmove', e => {
+document.addEventListener('touchmove', e => {
+  if (!touchActive()) return;
   e.preventDefault();
-  if (!dead) touchDir = touchPos(e) < W / 2 ? -1 : 1;
+  touchDir = touchPos(e) < W / 2 ? -1 : 1;
 }, {passive: false});
-canvas.addEventListener('touchend', e => {
-  e.preventDefault();
+document.addEventListener('touchend', e => {
   if (e.touches.length === 0) touchDir = 0;
+  else if (touchActive()) touchDir = touchPos(e) < W / 2 ? -1 : 1;   // 松开一根手指，跟随剩下的
 }, {passive: false});
 document.getElementById('mutebtn').textContent = muted ? '🔇' : '🔊';
 document.getElementById('mutebtn').addEventListener('click', () => { ensureAudio(); toggleMute(); });
+// 手机上看键盘提示没意义，换成触控说明
+if ('ontouchstart' in window) document.getElementById('hint').textContent = '按住屏幕左/右半边移动，全屏任意位置都有效';
 
 // ---------- 界面流程 ----------
 const panels = {
@@ -1767,7 +1854,7 @@ function die(reason, byThunder) {
   bank += coinCount;
   const m = Math.floor(meters);
   if (m > bestMeters) bestMeters = m;
-  localStorage.setItem('jtm_best', bestMeters);
+  saveLS('jtm_best', bestMeters);
   saveMeta();
   checkAch(!!byThunder);
   document.getElementById('deathTitle').textContent = reason || '坠落啦';
@@ -1866,7 +1953,7 @@ document.getElementById('btnShareBack').onclick = () => showPanel('death');
 
 reset();
 showPanel('home');
-loop();
+requestAnimationFrame(loop);
 </script>
 <script>
 // PWA：注册离线缓存（仅 HTTPS 下生效，门牌 http 渠道自动跳过）
